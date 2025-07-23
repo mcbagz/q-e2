@@ -32,7 +32,7 @@ MODULE checkpoint_manager
   PUBLIC :: checkpoint_file_name, snapshot_dir_name
   PUBLIC :: soft_pause_requested, snapshot_requested
   PUBLIC :: checkpoint_requested_file
-  PUBLIC :: reset_snapshot_flag
+  PUBLIC :: reset_snapshot_flag, reset_soft_pause_flag
   !
   ! Module variables
   LOGICAL :: soft_pause_requested = .FALSE.
@@ -149,12 +149,19 @@ CONTAINS
     ! Generate info filename
     info_file = TRIM(filename) // '.info'
     !
+    ! Get timestamp
+    CALL date_and_time(VALUES=timestamp)
+    !
+    ! Print checkpoint details to terminal
+    WRITE(stdout, '(5X,"Checkpoint timestamp: ",I4,"/",I2.2,"/",I2.2," ",I2.2,":",I2.2,":",I2.2)') &
+      timestamp(1), timestamp(2), timestamp(3), timestamp(4), timestamp(5), timestamp(6)
+    WRITE(stdout, '(5X,"Writing checkpoint info to: ",A)') TRIM(info_file)
+    !
     ! Write checkpoint info
     iunit = 99
     OPEN(UNIT=iunit, FILE=TRIM(info_file), STATUS='replace', IOSTAT=ios)
     !
     IF ( ios == 0 ) THEN
-      CALL date_and_time(VALUES=timestamp)
       WRITE(iunit, '(A)') "QUANTUM ESPRESSO CHECKPOINT INFO"
       WRITE(iunit, '(A)') "================================"
       WRITE(iunit, '(A,I4,"/",I2.2,"/",I2.2," ",I2.2,":",I2.2,":",I2.2)') &
@@ -167,8 +174,7 @@ CONTAINS
       CLOSE(iunit)
       !
       checkpoint_file_name = filename
-      WRITE(stdout, '(/,5X,"Checkpoint info written to: ",A)') TRIM(info_file)
-      WRITE(stdout, '(5X,"Resume with: pw.x --resume-from ",A)') TRIM(filename)
+      WRITE(stdout, '(5X,"Checkpoint info file created successfully")')
     ELSE
       WRITE(stdout, '(/,5X,"WARNING: Could not write checkpoint info file")')
     END IF
@@ -226,6 +232,11 @@ CONTAINS
       timestamp(1), timestamp(2), timestamp(3), '_', &
       timestamp(4), timestamp(5), timestamp(6), '_snapshot.txt'
     !
+    ! Print snapshot info to terminal
+    WRITE(stdout, '(5X,"Snapshot timestamp: ",I4,"/",I2.2,"/",I2.2," ",I2.2,":",I2.2,":",I2.2)') &
+      timestamp(1), timestamp(2), timestamp(3), timestamp(4), timestamp(5), timestamp(6)
+    WRITE(stdout, '(5X,"Writing snapshot to: ",A)') TRIM(snapshot_file)
+    !
     ! Write snapshot
     iunit = 98
     OPEN(UNIT=iunit, FILE=TRIM(snapshot_file), STATUS='replace', IOSTAT=ios)
@@ -238,10 +249,11 @@ CONTAINS
         timestamp(4), timestamp(5), timestamp(6)
       WRITE(iunit, '(A,I5)') "SCF Iteration: ", scf_iter
       WRITE(iunit, '(A,F15.8,A)') "Total Energy: ", etot, " Ry"
+      WRITE(iunit, '(A)') "Calculation Status: Running"
       !
       CLOSE(iunit)
       !
-      WRITE(stdout, '(5X,"Status snapshot written to: ",A)') TRIM(snapshot_file)
+      WRITE(stdout, '(5X,"Snapshot file created successfully")')
     ELSE
       WRITE(stdout, '(5X,"WARNING: Could not write snapshot file")')
     END IF

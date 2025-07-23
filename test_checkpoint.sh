@@ -27,10 +27,11 @@ cat > test_checkpoint.in << EOF
     mixing_beta = 0.7
 /
 ATOMIC_SPECIES
- Si  28.086  Si.pbe-n-rrkjus_psl.1.0.0.UPF
+ Si  28.086  Si_r.upf
 ATOMIC_POSITIONS (alat)
  Si 0.00 0.00 0.00
  Si 0.25 0.25 0.25
+ Si 0.5 0.5 0.5
 K_POINTS (automatic)
  4 4 4 1 1 1
 EOF
@@ -40,7 +41,7 @@ echo "================================================="
 echo "Starting pw.x in background..."
 
 # Start pw.x in background
-pw.x -input test_checkpoint.in > test_checkpoint.out 2>&1 &
+build/bin/pw.x -input test_checkpoint.in > test_checkpoint.out 2>&1 &
 PW_PID=$!
 
 echo "PW PID: $PW_PID"

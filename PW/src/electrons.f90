@@ -54,7 +54,8 @@ SUBROUTINE electrons()
   USE ions_base,            ONLY : tau
   USE checkpoint_manager,   ONLY : check_checkpoint_signals, soft_pause_requested, &
                                    snapshot_requested, write_checkpoint_info, &
-                                   write_status_snapshot, reset_snapshot_flag
+                                   write_status_snapshot, reset_snapshot_flag, &
+                                   reset_soft_pause_flag
   !
   IMPLICIT NONE
   !
@@ -424,7 +425,7 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE control_flags,        ONLY : n_scf_steps, scf_error, scissor, gamma_only
   USE sci_mod,              ONLY : sci_iter
 
-  USE io_files,             ONLY : iunmix, output_drho
+  USE io_files,             ONLY : iunmix, output_drho, tmp_dir, prefix
   USE ldaU,                 ONLY : eth, lda_plus_u, lda_plus_u_kind, &
                                    niter_with_fixed_ns, hub_pot_fix, &
                                    nsg, nsgnew, v_nsg, at_sc, neighood, &
@@ -465,7 +466,8 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE makovpayne,           ONLY : makov_payne
   USE checkpoint_manager,   ONLY : check_checkpoint_signals, soft_pause_requested, &
                                    snapshot_requested, write_checkpoint_info, &
-                                   write_status_snapshot, reset_snapshot_flag
+                                   write_status_snapshot, reset_snapshot_flag, &
+                                   reset_soft_pause_flag
   !
 #if defined (__ENVIRON)
   USE plugin_flags,         ONLY : use_environ
@@ -616,10 +618,8 @@ SUBROUTINE electrons_scf ( printout, exxen )
      ! ... Handle soft pause request
      !
      IF ( soft_pause_requested ) THEN
-        WRITE(stdout,'(/,5X,"Soft pause requested - completing current SCF cycle...")')
-        ! Complete this iteration
-        iter = iter + 1
-        IF(scissor) sci_iter = iter
+        WRITE(stdout,'(/,5X,"*** SOFT PAUSE REQUESTED ***")')
+        WRITE(stdout,'(5X,"Completing current SCF iteration before checkpoint...")')
         ! Continue with this SCF cycle, but set flag to exit after completion
         ! The actual checkpoint writing will be done after the cycle completes
      ENDIF
@@ -627,10 +627,12 @@ SUBROUTINE electrons_scf ( printout, exxen )
      ! ... Handle snapshot request
      !
      IF ( snapshot_requested ) THEN
-        WRITE(stdout,'(/,5X,"Writing status snapshot...")')
+        WRITE(stdout,'(/,5X,"*** STATUS SNAPSHOT REQUESTED ***")')
+        WRITE(stdout,'(5X,"Current SCF iteration: ",I5)') iter
+        WRITE(stdout,'(5X,"Current total energy: ",F15.8," Ry")') etot
         CALL write_status_snapshot(iter, etot)
         CALL reset_snapshot_flag()  ! Reset flag
-        WRITE(stdout,'(5X,"Snapshot written, calculation continuing...")')
+        WRITE(stdout,'(5X,"Snapshot complete, calculation continuing...")')
      ENDIF
      !
      IF ( check_stop_now() ) THEN
@@ -1047,10 +1049,24 @@ SUBROUTINE electrons_scf ( printout, exxen )
      ! ... Check if soft pause was requested - write checkpoint and exit
      !
      IF ( soft_pause_requested ) THEN
-        WRITE(stdout,'(/,5X,"SCF cycle completed. Writing checkpoint...")')
+        WRITE(stdout,'(/,5X,"*** CHECKPOINT CREATION ***")')
+        WRITE(stdout,'(5X,"SCF iteration ",I5," completed")') iter
+        WRITE(stdout,'(5X,"Total energy: ",F15.8," Ry")') etot
+        WRITE(stdout,'(5X,"Energy convergence: ",L1)') conv_elec
+        
+        ! Create checkpoint files
+        WRITE(stdout,'(/,5X,"Creating checkpoint files:")')
         CALL write_checkpoint_info('checkpoint_scf.dat', iter, etot, conv_elec)
+        
+        ! Save full calculation data
+        WRITE(stdout,'(5X,"Saving calculation data to: ",A)') TRIM(tmp_dir)//TRIM(prefix)//'.save/'
         CALL punch('config')  ! Save actual data
         CALL save_in_electrons(iter, dr2, ethr, et)
+        
+        ! Reset flag and exit
+        WRITE(stdout,'(/,5X,"Checkpoint complete. Exiting calculation.")')
+        WRITE(stdout,'(5X,"To resume: pw.x --resume-from checkpoint_scf.dat -in input.in")')
+        CALL reset_soft_pause_flag()
         conv_elec = .FALSE.
         GO TO 10
      ENDIF
