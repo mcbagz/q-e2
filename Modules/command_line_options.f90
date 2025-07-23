@@ -31,6 +31,8 @@ MODULE command_line_options
   LOGICAL :: library_init = .FALSE.
   ! ... input file name read from command line
   CHARACTER(LEN=256) :: input_file_ = ' '
+  ! ... checkpoint file name for resume functionality
+  CHARACTER(LEN=256) :: checkpoint_file_ = ' '
   ! ... Command line arguments that were not identified and processed
   CHARACTER(LEN=512) :: command_line = ' '
   !
@@ -147,6 +149,14 @@ CONTAINS
               ENDIF
               READ ( arg, *, ERR = 15, END = 15) nmany_
               narg = narg + 1 
+           CASE ( '--resume-from', '-resume-from' )
+              IF (read_string) THEN
+                 CALL my_getarg ( input_command_line, narg, checkpoint_file_ )
+              ELSE
+                 CALL get_command_argument ( narg, checkpoint_file_ )
+              ENDIF
+              IF ( TRIM (checkpoint_file_) == ' ' ) GO TO 15
+              narg = narg + 1
            CASE DEFAULT
               command_line = TRIM(command_line) // ' ' // TRIM(arg)
         END SELECT
@@ -161,6 +171,7 @@ CONTAINS
 20   CONTINUE
      CALL mp_bcast( command_line, root, world_comm ) 
      CALL mp_bcast( input_file_ , root, world_comm ) 
+     CALL mp_bcast( checkpoint_file_ , root, world_comm ) 
      CALL mp_bcast( nimage_, root, world_comm ) 
      CALL mp_bcast( npool_ , root, world_comm ) 
      CALL mp_bcast( ntg_   , root, world_comm ) 

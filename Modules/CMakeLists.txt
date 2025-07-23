@@ -11,6 +11,7 @@ set(src_modules
     bz_form.f90 
     cell_base.f90  
     check_stop.f90  
+    checkpoint_manager.f90
     command_line_options.f90 
     compute_dipole.f90 
     constants.f90 
@@ -212,6 +213,7 @@ qe_add_library(qe_modules ${src_modules})
 # subroutines and functions (not modules) previously found in clib
 set(src_modules_c
     customize_signals.c
+    signal_wrap.c
     qmmm_aux.c
     sockets.c)
 add_library(qe_modules_c ${src_modules_c})

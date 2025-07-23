@@ -52,6 +52,9 @@ SUBROUTINE electrons()
   USE makovpayne,           ONLY : makov_payne
   USE vlocal,               ONLY : strf, vloc
   USE ions_base,            ONLY : tau
+  USE checkpoint_manager,   ONLY : check_checkpoint_signals, soft_pause_requested, &
+                                   snapshot_requested, write_checkpoint_info, &
+                                   write_status_snapshot, reset_snapshot_flag
   !
   IMPLICIT NONE
   !
@@ -460,6 +463,9 @@ SUBROUTINE electrons_scf ( printout, exxen )
   USE device_fbuff_m,       ONLY : dev_buf, pin_buf
   USE pwcom,                ONLY : report_mag 
   USE makovpayne,           ONLY : makov_payne
+  USE checkpoint_manager,   ONLY : check_checkpoint_signals, soft_pause_requested, &
+                                   snapshot_requested, write_checkpoint_info, &
+                                   write_status_snapshot, reset_snapshot_flag
   !
 #if defined (__ENVIRON)
   USE plugin_flags,         ONLY : use_environ
@@ -602,6 +608,30 @@ SUBROUTINE electrons_scf ( printout, exxen )
   !%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   !
   DO idum = 1, niter
+     !
+     ! ... Check for checkpoint signals
+     !
+     CALL check_checkpoint_signals()
+     !
+     ! ... Handle soft pause request
+     !
+     IF ( soft_pause_requested ) THEN
+        WRITE(stdout,'(/,5X,"Soft pause requested - completing current SCF cycle...")')
+        ! Complete this iteration
+        iter = iter + 1
+        IF(scissor) sci_iter = iter
+        ! Continue with this SCF cycle, but set flag to exit after completion
+        ! The actual checkpoint writing will be done after the cycle completes
+     ENDIF
+     !
+     ! ... Handle snapshot request
+     !
+     IF ( snapshot_requested ) THEN
+        WRITE(stdout,'(/,5X,"Writing status snapshot...")')
+        CALL write_status_snapshot(iter, etot)
+        CALL reset_snapshot_flag()  ! Reset flag
+        WRITE(stdout,'(5X,"Snapshot written, calculation continuing...")')
+     ENDIF
      !
      IF ( check_stop_now() ) THEN
         conv_elec=.FALSE.
@@ -1013,6 +1043,17 @@ SUBROUTINE electrons_scf ( printout, exxen )
         EXIT scf_step
         !
      ENDDO scf_step
+     !
+     ! ... Check if soft pause was requested - write checkpoint and exit
+     !
+     IF ( soft_pause_requested ) THEN
+        WRITE(stdout,'(/,5X,"SCF cycle completed. Writing checkpoint...")')
+        CALL write_checkpoint_info('checkpoint_scf.dat', iter, etot, conv_elec)
+        CALL punch('config')  ! Save actual data
+        CALL save_in_electrons(iter, dr2, ethr, et)
+        conv_elec = .FALSE.
+        GO TO 10
+     ENDIF
      !
      plugin_etot = 0.0_dp
      !

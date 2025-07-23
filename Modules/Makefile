@@ -20,6 +20,7 @@ bspline.o \
 bz_form.o \
 cell_base.o  \
 check_stop.o  \
+checkpoint_manager.o \
 command_line_options.o \
 compute_dipole.o \
 constants.o \
@@ -219,6 +220,7 @@ w0gauss.o \
 w1gauss.o \
 deviatoric.o \
 customize_signals.o \
+signal_wrap.o \
 qmmm_aux.o \
 sockets.o
 

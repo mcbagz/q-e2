@@ -46,11 +46,13 @@ SUBROUTINE run_pwscf( exit_status )
   USE control_flags,        ONLY : conv_ions, istep, nstep, restart, lmd, lbfgs,&
                                    lensemb, lforce=>tprnfor, tstress
   USE cellmd,               ONLY : lmovecell
-  USE command_line_options, ONLY : command_line
+  USE command_line_options, ONLY : command_line, checkpoint_file_
   USE force_mod,            ONLY : sigma, force
   USE check_stop,           ONLY : check_stop_init, check_stop_now
   USE mp_images,            ONLY : intra_image_comm
   USE extrapolation,        ONLY : update_file, update_pot
+  USE checkpoint_manager,   ONLY : install_checkpoint_handlers, &
+                                   checkpoint_file_name
   USE scf,                  ONLY : rho
   USE lsda_mod,             ONLY : nspin
   USE fft_base,             ONLY : dfftp
@@ -138,6 +140,19 @@ SUBROUTINE run_pwscf( exit_status )
 #endif
   !
   CALL check_stop_init()
+  !
+  ! ... Install checkpoint signal handlers
+  !
+  CALL install_checkpoint_handlers()
+  !
+  ! ... Check if we need to resume from a checkpoint
+  !
+  IF ( TRIM(checkpoint_file_) /= ' ' ) THEN
+     IF (ionode) WRITE(stdout, '(/,5X,"Resuming from checkpoint: ",A)') TRIM(checkpoint_file_)
+     ! Set restart flag to load data
+     restart = .TRUE.
+     checkpoint_file_name = checkpoint_file_
+  END IF
   !
   CALL setup()
   !
