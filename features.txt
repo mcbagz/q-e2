@@ -1,0 +1,18 @@
+Feature Ideas:
+ - Checkpoints and restarting
+   - Realtime monitoring
+   - Modify the SCF loop to output intermediate results to a file or socket at each iteration, and implement a control mechanism to pause/resume via signals or input flags.
+   - Snapshot to check while still running.
+ - Automated Parameter Optimization
+   - Add a module to automatically optimize key input parameters (e.g., k-point grid, energy cutoffs) based on system size and desired accuracy. This reduces the trial-and-error process for beginners.
+ - Simplified Pseudopotential Management
+   - Integrate a pseudopotential recommendation system within QE, suggesting the best pseudopotential (e.g., norm-conserving vs. ultrasoft) based on the material and calculation type.
+ - Sanity checks
+   - "You have an atom that is not bonded"
+   - Not an error, but like "Is this what you intended?"
+   - Probably some pattern matching
+ - GUI
+   - Edit file in GUI
+   - button to launch viewer with the processed output file
+   - pause/restart/snapshot commands
+   - sanity checks

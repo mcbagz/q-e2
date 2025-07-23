@@ -1,0 +1,93 @@
+{
+	"meta": {
+		"generatedAt": "2025-07-23T04:19:09.743Z",
+		"tasksAnalyzed": 10,
+		"totalTasks": 10,
+		"analysisCount": 10,
+		"thresholdScore": 5,
+		"projectName": "Taskmaster",
+		"usedResearch": false
+	},
+	"complexityAnalysis": [
+		{
+			"taskId": 1,
+			"taskTitle": "Create checkpoint_manager module with POSIX signal support",
+			"complexityScore": 8,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Produce a refined work-plan for Task 1 that: (a) enumerates every API signature and shared variable; (b) specifies exact C/Fortran binding details including name-mangling rules, volatile semantics and thread safety; (c) designs the binary checkpoint layout, versioning strategy and forward-compatibility policy; (d) drafts a complete test matrix for unit, integration, performance and sanitizer runs; (e) lists all required build-system changes (Make, CMake, CI) with compiler flags; and (f) identifies failure-handling and recovery workflows.",
+			"reasoning": "Requires cross-language signalling, asynchronous safety, binary I/O, build adjustments and multi-platform tests; multiple moving parts justify one extra subtask for binary-format and compatibility design."
+		},
+		{
+			"taskId": 2,
+			"taskTitle": "Integrate signal handling & --resume-from in run_pwscf and command_line_options",
+			"complexityScore": 6,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Detail the integration sequence for Task 2: outline CLI parser updates, state-propagation mechanism, MPI broadcast strategy, startup banner logic, regression-suite additions and roll-back plan for legacy behaviour.",
+			"reasoning": "Touches CLI parsing, startup flow and MPI coordination but builds on Task 1’s groundwork; existing 5 subtasks should suffice."
+		},
+		{
+			"taskId": 3,
+			"taskTitle": "Add SCF-cycle signal polling in electrons.f90",
+			"complexityScore": 7,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Create a step-by-step design for Task 3 covering: placement of polling hooks, OpenMP critical sections, filename generator utility, race-condition analysis, performance benchmarking script and extensive stress-test scenarios with rapid signal bursts.",
+			"reasoning": "Concurrency, performance guarantees and new utility functions add notable complexity; an additional subtask for stress/performance testing is advisable."
+		},
+		{
+			"taskId": 4,
+			"taskTitle": "Implement parameter_optimization module",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Develop a comprehensive implementation roadmap for Task 4 that defines data structures, mathematical formulas, dry-run interface with SCF driver, stopping criteria, serial-vs-MPI constraints, logging format and validation benchmarks.",
+			"reasoning": "Algorithmic work with moderate scope; existing 5 subtasks cover skeleton, two algorithms, orchestrator and integration."
+		},
+		{
+			"taskId": 5,
+			"taskTitle": "Wire parameter optimiser into input parser and setup",
+			"complexityScore": 6,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Outline the full integration plan for Task 5: namelist syntax changes, parsing workflow, global state propagation, MPI broadcast of tuned parameters, provenance printing, and backward-compatibility regression tests.",
+			"reasoning": "Mostly glue code and parser updates; current five subtasks appear adequate."
+		},
+		{
+			"taskId": 6,
+			"taskTitle": "Create pseudopotential recommender module and JSON database",
+			"complexityScore": 7,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Draft an execution plan for Task 6 including: JSON schema specification, Python database generator, Fortran JSON-loader integration, selection algorithm definition, caching/performance targets, CI validation steps and documentation deliverables.",
+			"reasoning": "Combines cross-language tooling, external library integration, performance goals and CI enforcement; one extra subtask for caching/performance tuning is useful."
+		},
+		{
+			"taskId": 7,
+			"taskTitle": "Integrate PP recommendation into read_pseudo and export_upf",
+			"complexityScore": 5,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Provide a phased plan for Task 7: CLI flag plumbing, recommender invocation points, interactive prompt logic, metadata block definition, database auto-update workflow and regression tests to ensure unchanged legacy paths.",
+			"reasoning": "Feature extension leveraging Task 6; existing five subtasks already capture required work."
+		},
+		{
+			"taskId": 8,
+			"taskTitle": "Develop sanity_config and sanity_checks modules",
+			"complexityScore": 8,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Create a detailed blueprint for Task 8 that covers: configuration key taxonomy, INI parser back-end decision tree, typed accessor API, scalable check registration framework, severity handling policy, and exhaustive unit/integration test catalogue with sanitizer runs.",
+			"reasoning": "Introduces new configuration subsystem, parsing engine, multiple physics checks and persistence; warrants an extra subtask for API & registration framework design."
+		},
+		{
+			"taskId": 9,
+			"taskTitle": "Hook sanity checks into setup and command-line options",
+			"complexityScore": 7,
+			"recommendedSubtasks": 5,
+			"expansionPrompt": "Lay out the integration steps for Task 9: extend CLI parser, propagate flags, apply runtime overrides, ensure single-rank prompting with MPI broadcast, define exit codes, and augment CI suites for every flag combination.",
+			"reasoning": "Requires CLI, config interaction and MPI coordination; complexity moderate and five subtasks are sufficient."
+		},
+		{
+			"taskId": 10,
+			"taskTitle": "Implement minimal GUI backend with pause/resume & sanity integration",
+			"complexityScore": 7,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Compose an implementation guide for Task 10: project scaffolding, REST/WebSocket API contract, process management abstraction, signal handling, sanity output parsing, deployment (systemd) packaging, and end-to-end automated tests.",
+			"reasoning": "Full-stack Python service with real-time communication and OS signal work; one extra subtask for deployment packaging and E2E tests enhances completeness."
+		}
+	]
+}
