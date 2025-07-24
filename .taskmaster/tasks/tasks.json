@@ -9,7 +9,7 @@
         "testStrategy": "Unit: f90 driver sets alarm(1); in handler set flag; verify flag flip.\nCheckpoint: write then reload; compare energy/iteration numbers.\nValgrind memory check.\nCI: run on Linux/macOS runners.\nPerformance: ensure write ≤2× wall-clock of normal final write.",
         "priority": "high",
         "dependencies": [],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -17,7 +17,7 @@
             "description": "Create a small C source file wrapping the POSIX signal(3) API so that Fortran code can register its own handlers for SIGUSR1 and SIGUSR2 via ISO_C_BINDING C_FUNPTRs.",
             "dependencies": [],
             "details": "• File: src/signal_wrap.c (or Modules/signal_wrap.c depending on layout).  \n• Include <signal.h> and <stdint.h>.  \n• Expose two extern \"C\" functions with BIND(C)-compatible names:  \n    void c_set_usr1_handler(void (*f)(int));  \n    void c_set_usr2_handler(void (*f)(int));  \n  Each stores the passed function pointer in a static and calls signal(SIGUSR1/2, f).  \n• Provide a no-op default stub to avoid null pointers before Fortran installs its handlers.  \n• Add signal_wrap.h exporting the prototypes (not strictly required by Fortran but useful for C unit tests).  \n• Modify build system (make.inc) to compile signal_wrap.c and add it to the object list (e.g., OBJS += signal_wrap.o).  \n• Compilation flags: -std=c99, ensure no name mangling (extern \"C\" if compiled as C++).",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Write a stand-alone C program that registers a dummy handler through c_set_usr1_handler, send itself SIGUSR1 with raise(), assert handler executed (e.g., increments volatile global). Build in CI with -fsanitize=address/undefined."
           },
           {
@@ -28,7 +28,7 @@
               1
             ],
             "details": "• MODULE checkpoint_manager  \n    USE ISO_C_BINDING  \n    PRIVATE  \n    PUBLIC :: install_signal_handlers, write_checkpoint, load_checkpoint, write_status_snapshot, soft_pause_requested, snapshot_requested  \n    LOGICAL, VOLATILE :: soft_pause_requested = .FALSE., snapshot_requested = .FALSE.  \n    INTERFACE  \n       SUBROUTINE c_set_usr1_handler(f) BIND(C,NAME=\"c_set_usr1_handler\")  \n         IMPORT :: C_FUNPTR  \n         TYPE(C_FUNPTR), VALUE :: f  \n       END SUBROUTINE  \n       SUBROUTINE c_set_usr2_handler(f) BIND(C,NAME=\"c_set_usr2_handler\")  \n         IMPORT :: C_FUNPTR  \n         TYPE(C_FUNPTR), VALUE :: f  \n       END SUBROUTINE  \n    END INTERFACE  \n    CONTAINS  \n      SUBROUTINE install_signal_handlers() ; END  \n      SUBROUTINE write_checkpoint(fname,iter,etot,conv) ; END  \n      SUBROUTINE load_checkpoint(fname) ; END  \n      SUBROUTINE write_status_snapshot(iter,etot,forces,stress) ; END  \n END MODULE checkpoint_manager",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Re-run full project build; ensure linkage with signal_wrap.o succeeds and module exports expected symbols via nm or objdump."
           },
           {
@@ -40,7 +40,7 @@
               2
             ],
             "details": "• In checkpoint_manager.f90 add:  \n   SUBROUTINE handle_soft_pause_signal(sig) BIND(C) ; USE ISO_C_BINDING ; INTEGER(C_INT), VALUE :: sig ; soft_pause_requested = .TRUE. ; END  \n   SUBROUTINE handle_snapshot_signal(sig) BIND(C) ; USE ISO_C_BINDING ; INTEGER(C_INT), VALUE :: sig ; snapshot_requested = .TRUE. ; END  \n• Within install_signal_handlers():  \n   TYPE(C_FUNPTR) :: fp1, fp2  \n   fp1 = C_FUNLOC(handle_soft_pause_signal)  \n   fp2 = C_FUNLOC(handle_snapshot_signal)  \n   CALL c_set_usr1_handler(fp1)  \n   CALL c_set_usr2_handler(fp2)  \n• Ensure VOLATILE attribute on flags so they are visible across async signal contexts.  \n• Update compiler flags (e.g., -fno-omit-frame-pointer, -pthread if needed).  \n• Document that install_signal_handlers() must be invoked early in program start-up.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Create test/utils/test_signal_driver.f90:  \n  CALL install_signal_handlers(); PRINT *, 'PID', getpid(); CALL sleep(1); SYSTEM('kill -USR1 ' // pid); CALL sleep(1); ASSERT(soft_pause_requested);  \nSimilar test for snapshot flag.  Run under CI on Linux/macOS."
           },
           {
@@ -51,7 +51,7 @@
               2
             ],
             "details": "• Define INTEGER, PARAMETER :: chkpt_version = 1.  \n• write_checkpoint(fname,iter,etot,conv):  \n  OPEN(NEWUNIT=iu,FILE=fname,STATUS='REPLACE',ACCESS='SEQUENTIAL',FORM='UNFORMATTED')  \n  WRITE(iu) chkpt_version  \n  WRITE(iu) iter, etot, conv  \n  ! Extend with REAL*8 arrays (forces, stress, etc.) when available  \n  CLOSE(iu).  \n• load_checkpoint(fname):  \n  OPEN(NEWUNIT=iu,FILE=fname,STATUS='OLD',ACCESS='SEQUENTIAL',FORM='UNFORMATTED')  \n  READ(iu) ver ; IF (ver /= chkpt_version) STOP 'Incompatible checkpoint'  \n  READ(iu) iter, etot, conv  \n  CLOSE(iu)  \n• Add error trapping with IOSTAT and convert to module-local error codes.  \n• Use flush(iu) or CLOSE action='KEEP' to guarantee data written.  \n• Provide helper INTERNAL subroutine safe_open().",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Unit test writes a checkpoint, immediately reads it back, compares all scalar values with ASSERT_EQ.  Run under valgrind to confirm no leaks or invalid memory.  Fallback path: attempt to read a deliberately corrupted version tag and assert graceful failure."
           },
           {
@@ -63,7 +63,7 @@
               4
             ],
             "details": "• write_status_snapshot(iter,etot,forces,stress):  \n  CHARACTER(LEN=*), PARAMETER :: dir='snapshots'  \n  CALL SYSTEM('mkdir -p ' // trim(dir))  \n  WRITE(filename,'(A,I0.6)') dir//'/snap_',iter,'.txt'  \n  OPEN(NEWUNIT=iu,FILE=filename,STATUS='REPLACE',FORM='FORMATTED')  \n  WRITE(iu,*) 'Iteration',iter  \n  WRITE(iu,*) 'Etot',etot  \n  IF (SIZE(forces)>0) WRITE(iu,*) 'Forces',forces  \n  IF (SIZE(stress)>0) WRITE(iu,*) 'Stress',stress  \n  CLOSE(iu)  \n• At program main loop, caller can poll snapshot_requested and invoke this subroutine.  \n• Extend make.inc test target to build test_signal_driver and a new test_checkpoint_io executable.  \n• CI:   \n   – Run tests on Linux & macOS.  \n   – Use timeout to ensure checkpoint write < 2× baseline final write.  \n   – Use valgrind/asan job for memory checking.  \n• Documentation: update README and developer guide with usage instructions and environment notes (POSIX-only).",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Integration script:  \n  1) Start test_driver that installs handlers and enters compute loop.  \n  2) Send SIGUSR2; wait; verify snapshots/<file> exists and contains correct iteration.  \n  3) Send SIGUSR1; driver detects soft_pause_requested=.TRUE. and exits after checkpoint write.  \n  4) Restart driver with --restart; verify it loads checkpoint and continues iterations.  \n  All checks performed automatically in CI workflow."
           }
         ]
@@ -78,7 +78,7 @@
         "dependencies": [
           1
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -86,7 +86,7 @@
             "description": "Modify Modules/command_line_options.f90 so that get_command_line_option() detects the new --resume-from=<file> argument and stores its value.",
             "dependencies": [],
             "details": "• In command_line_options.f90, add CHARACTER(LEN=256) :: resume_file = \"\" and LOGICAL :: resume_flag_present = .FALSE.\n• In the option-scanning loop, match the token that begins with \"--resume-from=\". Use INDEX(arg,\"--resume-from=\") == 1 to detect it, then extract the substring after the ‘=’ into resume_file using arg(LEN(\"--resume-from=\")+1:).\n• Set resume_flag_present = .TRUE. when found; leave other existing options untouched.\n• Keep backwards-compatibility: if flag is absent resume_file remains blank.\n• Ensure parser stops treating subsequent CLI items as namelists only if they do not start with \"--\".\n• Add unit entry point get_resume_file() returning resume_file for external modules.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Unit test: run pw.x with --resume-from=ckpt.dat and verify get_resume_file() returns \"ckpt.dat\". Run without the flag and verify the empty string is returned."
           },
           {
@@ -97,7 +97,7 @@
               1
             ],
             "details": "• New file Modules/resume_state.f90 containing:\n   MODULE resume_state\n     CHARACTER(LEN=256) :: resume_file = \"\"\n     LOGICAL :: resumed_run = .FALSE.\n   END MODULE resume_state\n• In command_line_options.f90, after CLI parsing, USE resume_state and assign resume_state%resume_file = resume_file.\n• Add PUBLIC accessor functions (get_resume_file(), is_resumed_run()) for safer access if preferred.\n• Update the build system to compile the new module before any file that USEs it.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Compilation test across the full project; ensure no duplicate symbol or order-of-compilation problems. Unit test: call is_resumed_run() before and after manual assignment."
           },
           {
@@ -108,7 +108,7 @@
               2
             ],
             "details": "• USE checkpoint_manager and resume_state modules at the top of run_pwscf.f90.\n• Immediately after argument parsing completes, CALL install_signal_handlers().\n• IF (LEN_TRIM(resume_state%resume_file) > 0) THEN\n     CALL load_checkpoint(TRIM(resume_state%resume_file))\n     resume_state%resumed_run = .TRUE.\n   END IF\n• Capture potential I/O errors from load_checkpoint and abort gracefully with an informative message.\n• Guard this block so it executes on the master MPI rank only; broadcast resume_state%resumed_run to all ranks via MPI_BCAST.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Functional: start a short SCF, send SIGUSR1, restart with --resume-from=<generated file>; verify program prints Resuming banner and proceeds. MPI test with 4 ranks: confirm all ranks see the same resumed_run value."
           },
           {
@@ -119,7 +119,7 @@
               3
             ],
             "details": "• Locate sections in run_pwscf.f90 (and any called subroutines) that read charge density, wavefunctions, k-point grids, etc. Protect them with IF (.NOT. resume_state%resumed_run) THEN … END IF.\n• Just after checkpoint loading, WRITE(*,*) \"==== Resuming from checkpoint: \", TRIM(resume_state%resume_file).\n• Ensure variables that would normally be initialised by the skipped sections are fully restored by load_checkpoint (verify lists: rho, wf, energies, ecutwfc, etc.). Add ASSERT diagnostics if key arrays remain unallocated after load.\n• Verify logic does not alter cold-start path (resumed_run == .FALSE.).",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Regression: run standard benchmark input without --resume-from and compare SHA-256 of outputs to pre-change baseline. Resume path: start job, terminate via SIGUSR1, restart; confirm first scf iteration energy matches last pre-checkpoint within 1e-10 Ry and total run time skips initial read sections."
           },
           {
@@ -130,7 +130,7 @@
               4
             ],
             "details": "• In command_line_options.f90 usage() routine, append the line:\n  \"  --resume-from=<file>   Resume calculation from checkpoint written by SIGUSR1\"\n• Update Doc/users_guide.tex and the man page if present.\n• Add CI job steps:\n   1. run pw.x for 3 iterations on a tiny input; send SIGUSR1; capture checkpoint file.\n   2. restart with --resume-from and assert energy continuity (script using grep + awk).\n   3. run pw.x --help and grep for \"--resume-from\".\n• Maintain existing regression matrix to ensure unchanged behaviour when flag is absent.\n• Tag this feature in CHANGELOG.md.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "CI pipeline should pass all new stages. Manually run pw.x --help and confirm flag appears exactly once. Negative test: supply non-existent checkpoint file; program should exit with non-zero code and explanatory message."
           }
         ]
@@ -146,7 +146,7 @@
           1,
           2
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -154,7 +154,7 @@
             "description": "Refactor PW/src/electrons.f90 so that the first executable line inside DO iter = 1, niter invokes a new internal routine handle_signal_requests(). This call must be placed before any expensive calculations within the iteration to minimise latency, but after variables required by snapshot/checkpoint writers have been updated.",
             "dependencies": [],
             "details": "• Locate the main SCF loop (variable iter).\n• Add USE checkpoint_manager, ONLY: handle_signal_requests\n• Immediately after ‘iter = iter + 1’ (or equivalent) insert CALL handle_signal_requests(iter, etot, conv)\n• Ensure variable list passed contains everything needed later (iteration index, current energy, convergence logical, etc.).\n• Guard changes with pre-processor macro (#ifdef __SCF_SIGNAL_POLLING) to allow optional compilation if desired.\n• Re-compile to make sure current build remains clean.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Compile full QE suite; run a short Si input to ensure no behavioural change and no compiler warnings."
           },
           {
@@ -165,7 +165,7 @@
               1
             ],
             "details": "• Inside electrons.f90 add CONTAINS block if missing.\n• INTERFACE import: USE checkpoint_manager, ONLY: soft_pause_requested, snapshot_requested, write_status_snapshot, write_checkpoint, stop_run\n• Define: SUBROUTINE handle_signal_requests(iter, etot, conv)\n• Inside, wrap flag read in: !$OMP CRITICAL(check_flags); local_soft = soft_pause_requested; local_snap = snapshot_requested; !$OMP END CRITICAL(check_flags)\n• Emit message only on ionode: IF (ionode) WRITE(io_global,*) \"Signal poll: soft_pause=\",local_soft,\" snapshot=\",local_snap\n• Branch to dedicated helpers (implemented by later subtasks).",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Run under OMP_NUM_THREADS=4 with a tight loop that flips flags in a parallel section to verify no data races via Intel Thread Checker or valgrind-drd."
           },
           {
@@ -176,7 +176,7 @@
               2
             ],
             "details": "• When local_snap .TRUE.:\n   – CALL write_status_snapshot(iter, etot, forces, stress)\n   – Inside a second !$OMP CRITICAL(clear_snap) block set snapshot_requested = .FALSE.\n   – IF (ionode) WRITE(io_global,*) \"Snapshot written at iter\",iter\n• Ensure write_status_snapshot arguments exist in caller scope; pass placeholders (e.g. NULL() C_PTR) if not yet computed.\n• No interruption of the SCF loop; subroutine simply returns.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Functional: launch pw.x, send SIGUSR2 after a few iterations, verify snapshot file appears and calculation continues to converge."
           },
           {
@@ -187,7 +187,7 @@
               2
             ],
             "details": "• In main SCF loop declare logical :: pause_after_iter = .FALSE.\n• Immediately after CALL handle_signal_requests set pause_after_iter = soft_pause_requested (read once more in CRITICAL).\n• At very end of the iteration (just before END DO or cycle increment):\n   IF(pause_after_iter) THEN\n      fname = generate_checkpoint_filename()\n      CALL write_checkpoint(fname, iter, etot, conv)\n      IF (ionode) WRITE(io_global,*) \"Soft pause requested – checkpoint written to\",TRIM(fname)\n      !$OMP CRITICAL(clear_soft)\n      soft_pause_requested = .FALSE.\n      !$OMP END CRITICAL(clear_soft)\n      CALL stop_run(.FALSE.)\n   END IF\n• Ensure stop_run import via USE io_global or existing module.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Send SIGUSR1 mid-run; program must finish current iteration, emit message, write checkpoint, exit with status 0. Restart using existing --resume-from path to confirm restartability."
           },
           {
@@ -198,7 +198,7 @@
               4
             ],
             "details": "• In electrons.f90 CONTAINS section add FUNCTION generate_checkpoint_filename() RESULT(fname)\n   – USE, INTRINSIC :: iso_fortran_env\n   – CHARACTER(LEN=256) :: fname\n   – CALL date_and_time(values=time_vals)\n   – WRITE(fname,'(\"checkpoint_\",I4.4,I2.2,I2.2,\"_\",I2.2,I2.2,\".dat\")') time_vals(1),time_vals(2),time_vals(3),time_vals(5),time_vals(6)\n• Ensure function is PURE and callable from both master and worker ranks; optionally only master computes and broadcasts filename via MPI_BCAST.\n• Replace literal filenames in write_checkpoint calls with this function.\n• Update user documentation message accordingly.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Unit: call function, regex-match against pattern.\nIntegration: run two consecutive pauses; verify filenames differ and files exist; total overhead measured with /usr/bin/time <0.5 % against baseline."
           }
         ]
@@ -674,7 +674,7 @@
     ],
     "metadata": {
       "created": "2025-07-23T04:10:37.047Z",
-      "updated": "2025-07-23T04:10:37.047Z",
+      "updated": "2025-07-24T00:45:26.790Z",
       "description": "Tasks for master context"
     }
   }

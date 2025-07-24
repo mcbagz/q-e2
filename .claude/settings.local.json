@@ -5,7 +5,8 @@
       "Bash(task-master show:*)",
       "Bash(chmod:*)",
       "Bash(find:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(task-master set-status:*)"
     ],
     "deny": []
   }

@@ -83,11 +83,11 @@ CONTAINS
     IF ( meta_ionode ) THEN
       ierr = install_checkpoint_signals()
       IF ( ierr /= 0 ) THEN
-        WRITE(stdout, '(/,5X,"WARNING: Failed to install checkpoint signal handlers, code:",I3)') ierr
+        WRITE(0, '(/,5X,"WARNING: Failed to install checkpoint signal handlers, code:",I3)') ierr
       ELSE
-        WRITE(stdout, '(/,5X,"Checkpoint signal handlers installed successfully")')
-        WRITE(stdout, '(5X,"  - Send SIGUSR1 (kill -USR1 <pid>) for soft pause with checkpoint")')
-        WRITE(stdout, '(5X,"  - Send SIGUSR2 (kill -USR2 <pid>) for status snapshot")')
+        WRITE(0, '(/,5X,"Checkpoint signal handlers installed successfully")')
+        WRITE(0, '(5X,"  - Send SIGUSR1 (kill -USR1 <pid>) for soft pause with checkpoint")')
+        WRITE(0, '(5X,"  - Send SIGUSR2 (kill -USR2 <pid>) for status snapshot")')
       END IF
     END IF
     !
@@ -110,15 +110,13 @@ CONTAINS
       
       IF ( pause_flag /= 0 ) THEN
         soft_pause_requested = .TRUE.
-        WRITE(stdout, '(/,5X,"*** SOFT PAUSE SIGNAL RECEIVED ***")')
-        WRITE(stdout, '(5X,"Will complete current SCF cycle and write checkpoint...")')
+        WRITE(0, '(/,5X,"*** SOFT PAUSE SIGNAL RECEIVED ***")')
+        WRITE(0, '(5X,"Will complete current SCF cycle and write checkpoint...")')
       END IF
       
       IF ( snapshot_flag /= 0 ) THEN
         snapshot_requested = .TRUE.
-        ! Reset immediately as we don't want to stop
-        CALL reset_snapshot_flag()
-        WRITE(stdout, '(/,5X,"*** SNAPSHOT SIGNAL RECEIVED ***")')
+        WRITE(0, '(/,5X,"*** SNAPSHOT SIGNAL RECEIVED ***")')
       END IF
     END IF
     !
@@ -153,9 +151,9 @@ CONTAINS
     CALL date_and_time(VALUES=timestamp)
     !
     ! Print checkpoint details to terminal
-    WRITE(stdout, '(5X,"Checkpoint timestamp: ",I4,"/",I2.2,"/",I2.2," ",I2.2,":",I2.2,":",I2.2)') &
+    WRITE(0, '(5X,"Checkpoint timestamp: ",I4,"/",I2.2,"/",I2.2," ",I2.2,":",I2.2,":",I2.2)') &
       timestamp(1), timestamp(2), timestamp(3), timestamp(4), timestamp(5), timestamp(6)
-    WRITE(stdout, '(5X,"Writing checkpoint info to: ",A)') TRIM(info_file)
+    WRITE(0, '(5X,"Writing checkpoint info to: ",A)') TRIM(info_file)
     !
     ! Write checkpoint info
     iunit = 99
@@ -174,9 +172,9 @@ CONTAINS
       CLOSE(iunit)
       !
       checkpoint_file_name = filename
-      WRITE(stdout, '(5X,"Checkpoint info file created successfully")')
+      WRITE(0, '(5X,"Checkpoint info file created successfully")')
     ELSE
-      WRITE(stdout, '(/,5X,"WARNING: Could not write checkpoint info file")')
+      WRITE(0, '(/,5X,"WARNING: Could not write checkpoint info file")')
     END IF
     !
   END SUBROUTINE write_checkpoint_info
@@ -233,9 +231,9 @@ CONTAINS
       timestamp(4), timestamp(5), timestamp(6), '_snapshot.txt'
     !
     ! Print snapshot info to terminal
-    WRITE(stdout, '(5X,"Snapshot timestamp: ",I4,"/",I2.2,"/",I2.2," ",I2.2,":",I2.2,":",I2.2)') &
+    WRITE(0, '(5X,"Snapshot timestamp: ",I4,"/",I2.2,"/",I2.2," ",I2.2,":",I2.2,":",I2.2)') &
       timestamp(1), timestamp(2), timestamp(3), timestamp(4), timestamp(5), timestamp(6)
-    WRITE(stdout, '(5X,"Writing snapshot to: ",A)') TRIM(snapshot_file)
+    WRITE(0, '(5X,"Writing snapshot to: ",A)') TRIM(snapshot_file)
     !
     ! Write snapshot
     iunit = 98
@@ -253,9 +251,9 @@ CONTAINS
       !
       CLOSE(iunit)
       !
-      WRITE(stdout, '(5X,"Snapshot file created successfully")')
+      WRITE(0, '(5X,"Snapshot file created successfully")')
     ELSE
-      WRITE(stdout, '(5X,"WARNING: Could not write snapshot file")')
+      WRITE(0, '(5X,"WARNING: Could not write snapshot file")')
     END IF
     !
   END SUBROUTINE write_status_snapshot

@@ -1,0 +1,132 @@
+# Tips for Implementing Signal-Based Features in Quantum ESPRESSO
+
+## Architecture & Design Tips
+
+1. **Understand the Layered Architecture First**
+   - QE has a strict hierarchy: Modules → PW → Applications
+   - Modules CANNOT depend on higher-level components (e.g., don't use PW modules in Modules/)
+   - This caught us when checkpoint_manager tried to use klist, wvfct, etc.
+   - Solution: Keep signal handling minimal in Modules, let PW handle its own data
+
+2. **Build System Awareness**
+   - QE uses BOTH CMake and traditional Makefiles
+   - Always update BOTH when adding new files:
+     - Modules/Makefile (for traditional build)
+     - Modules/CMakeLists.txt (for CMake build)
+   - Docker builds typically use CMake, so CMakeLists.txt errors show up there
+
+3. **Fortran Module Dependencies**
+   - USE statements don't propagate to contained subroutines
+   - Each subroutine needs its own USE statements
+   - Watch for "has no IMPLICIT type" errors - usually missing USE statement
+
+## Signal Handling Specifics
+
+4. **Two-Flag System is Essential**
+   - Need BOTH C signal flag (volatile sig_atomic_t) AND Fortran module variable
+   - C flag: Set by signal handler, checked by Fortran
+   - Fortran flag: Used for MPI broadcast and program logic
+   - Must reset BOTH flags after handling!
+
+5. **MPI Considerations**
+   - Only ionode should check signals (avoid race conditions)
+   - Always mp_bcast signal status to all processes
+   - Use ionode guards for file I/O operations
+
+6. **Signal Handler Constraints**
+   - Keep signal handlers minimal (just set flag)
+   - Do real work in main program flow
+   - Use volatile sig_atomic_t for signal flags in C
+
+## Output & User Experience
+
+7. **Terminal Output with Redirection**
+   - stdout (unit 6) gets redirected with `> output.out`
+   - Use stderr (unit 0) for important user messages
+   - This ensures users see checkpoint messages even with output redirection
+
+8. **Clear User Feedback**
+   - Show timestamps for operations
+   - Display file paths being created
+   - Provide resume instructions after checkpoint
+   - Acknowledge signal receipt immediately
+
+## Common Pitfalls & Solutions
+
+9. **Flag Reset Bugs**
+   - Symptom: Operations repeat every cycle (like continuous snapshots)
+   - Cause: Only resetting C flag, not Fortran flag
+   - Solution: Reset both flags after operation completes
+
+10. **Compilation Order Issues**
+    - checkpoint_manager must be compiled before modules that use it
+    - Order matters in Makefile module lists
+    - CMakeLists.txt usually handles this automatically
+
+11. **File Path Construction**
+    - Use TRIM() on all path components
+    - Be careful with string concatenation in Fortran
+    - Test with various prefix/tmp_dir combinations
+
+## Testing & Debugging
+
+12. **Test Signal Delivery Methods**
+    - Direct: `kill -USR1 <pid>`
+    - Docker: `docker exec <container> kill -USR1 1`
+    - Both should work identically
+
+13. **Incremental Testing**
+    - Test signal receipt first (just print message)
+    - Then test flag propagation
+    - Finally test full functionality
+    - Use test scripts to automate this
+
+14. **Check File Creation**
+    - Verify .info files for metadata
+    - Check .save/ directory for actual data
+    - Test snapshot directory creation
+    - Ensure proper file permissions
+
+## Implementation Strategy
+
+15. **Start with Minimal Implementation**
+    - Get signals working with just print statements
+    - Add file writing later
+    - Add checkpoint data last
+    - This helps isolate issues
+
+16. **Use Existing Patterns**
+    - Study how check_stop_now() works
+    - Look at how punch() saves data
+    - Follow existing MPI broadcast patterns
+    - Reuse existing I/O routines where possible
+
+## What I Wish I Knew at the Start
+
+17. **The Module Dependency Issue Would Have Saved Hours**
+    - Trying to access PW data from Modules/ was fundamentally wrong
+    - Should have started with minimal signal handling only
+
+18. **CMake vs Makefile Differences**
+    - Would have updated both from the start
+    - Docker uses CMake, so that's where errors appear
+
+19. **The Two-Flag Pattern**
+    - Not obvious that both C and Fortran flags were needed
+    - Would have prevented the recurring snapshot bug
+
+20. **Output Redirection Behavior**
+    - Would have used stderr from the beginning
+    - Avoided confusion about "missing" output messages
+
+## Quick Debugging Checklist
+
+When something doesn't work:
+- [ ] Check both Makefile and CMakeLists.txt
+- [ ] Verify all USE statements in subroutines
+- [ ] Ensure both C and Fortran flags are reset
+- [ ] Check if output is going to .out file (not terminal)
+- [ ] Verify ionode guards on I/O operations
+- [ ] Test with simple input file first
+- [ ] Check compilation order in Makefiles
+- [ ] Look for "has no IMPLICIT type" errors

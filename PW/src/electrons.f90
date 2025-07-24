@@ -618,8 +618,8 @@ SUBROUTINE electrons_scf ( printout, exxen )
      ! ... Handle soft pause request
      !
      IF ( soft_pause_requested ) THEN
-        WRITE(stdout,'(/,5X,"*** SOFT PAUSE REQUESTED ***")')
-        WRITE(stdout,'(5X,"Completing current SCF iteration before checkpoint...")')
+        WRITE(0,'(/,5X,"*** SOFT PAUSE REQUESTED ***")')
+        WRITE(0,'(5X,"Completing current SCF iteration before checkpoint...")')
         ! Continue with this SCF cycle, but set flag to exit after completion
         ! The actual checkpoint writing will be done after the cycle completes
      ENDIF
@@ -627,12 +627,13 @@ SUBROUTINE electrons_scf ( printout, exxen )
      ! ... Handle snapshot request
      !
      IF ( snapshot_requested ) THEN
-        WRITE(stdout,'(/,5X,"*** STATUS SNAPSHOT REQUESTED ***")')
-        WRITE(stdout,'(5X,"Current SCF iteration: ",I5)') iter
-        WRITE(stdout,'(5X,"Current total energy: ",F15.8," Ry")') etot
+        WRITE(0,'(/,5X,"*** STATUS SNAPSHOT REQUESTED ***")')
+        WRITE(0,'(5X,"Current SCF iteration: ",I5)') iter
+        WRITE(0,'(5X,"Current total energy: ",F15.8," Ry")') etot
         CALL write_status_snapshot(iter, etot)
-        CALL reset_snapshot_flag()  ! Reset flag
-        WRITE(stdout,'(5X,"Snapshot complete, calculation continuing...")')
+        CALL reset_snapshot_flag()  ! Reset C flag
+        snapshot_requested = .FALSE.  ! Reset Fortran flag
+        WRITE(0,'(5X,"Snapshot complete, calculation continuing...")')
      ENDIF
      !
      IF ( check_stop_now() ) THEN
@@ -1049,24 +1050,25 @@ SUBROUTINE electrons_scf ( printout, exxen )
      ! ... Check if soft pause was requested - write checkpoint and exit
      !
      IF ( soft_pause_requested ) THEN
-        WRITE(stdout,'(/,5X,"*** CHECKPOINT CREATION ***")')
-        WRITE(stdout,'(5X,"SCF iteration ",I5," completed")') iter
-        WRITE(stdout,'(5X,"Total energy: ",F15.8," Ry")') etot
-        WRITE(stdout,'(5X,"Energy convergence: ",L1)') conv_elec
+        WRITE(0,'(/,5X,"*** CHECKPOINT CREATION ***")')
+        WRITE(0,'(5X,"SCF iteration ",I5," completed")') iter
+        WRITE(0,'(5X,"Total energy: ",F15.8," Ry")') etot
+        WRITE(0,'(5X,"Energy convergence: ",L1)') conv_elec
         
         ! Create checkpoint files
-        WRITE(stdout,'(/,5X,"Creating checkpoint files:")')
+        WRITE(0,'(/,5X,"Creating checkpoint files:")')
         CALL write_checkpoint_info('checkpoint_scf.dat', iter, etot, conv_elec)
         
         ! Save full calculation data
-        WRITE(stdout,'(5X,"Saving calculation data to: ",A)') TRIM(tmp_dir)//TRIM(prefix)//'.save/'
+        WRITE(0,'(5X,"Saving calculation data to: ",A)') TRIM(tmp_dir)//TRIM(prefix)//'.save/'
         CALL punch('config')  ! Save actual data
         CALL save_in_electrons(iter, dr2, ethr, et)
         
-        ! Reset flag and exit
-        WRITE(stdout,'(/,5X,"Checkpoint complete. Exiting calculation.")')
-        WRITE(stdout,'(5X,"To resume: pw.x --resume-from checkpoint_scf.dat -in input.in")')
-        CALL reset_soft_pause_flag()
+        ! Reset flags and exit
+        WRITE(0,'(/,5X,"Checkpoint complete. Exiting calculation.")')
+        WRITE(0,'(5X,"To resume: pw.x --resume-from checkpoint_scf.dat -in input.in")')
+        CALL reset_soft_pause_flag()  ! Reset C flag
+        soft_pause_requested = .FALSE.  ! Reset Fortran flag
         conv_elec = .FALSE.
         GO TO 10
      ENDIF
