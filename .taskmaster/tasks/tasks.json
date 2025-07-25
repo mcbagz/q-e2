@@ -211,7 +211,7 @@
         "testStrategy": "Unit: feed silicon conventional cell; expect grid 6×6×6 for 0.15 Å⁻¹ spacing.\nCutoff: mock energy function returning 1/E²; verify chosen cutoff near analytic optimum.\nRegression: disable optimisation by default; enabled run ≤max_iterations.",
         "priority": "medium",
         "dependencies": [],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -219,7 +219,7 @@
             "description": "Set up PW/src/parameter_optimization.f90 with PUBLIC interface, data types, and stub routines so that the codebase compiles while later subtasks are in progress.",
             "dependencies": [],
             "details": "• Add new source file PW/src/parameter_optimization.f90.\n• Declare MODULE parameter_optimization, USE necessary pwscf modules (k_points, io_global, kinds, etc.).\n• Define TYPE :: param_optimizer containing: real(dp) :: target_accuracy, integer :: max_iterations, logical :: optimize_kpoints=.false., optimize_cutoff=.false.\n• Provide a default-initialization CONTAINS subroutine init_param_optimizer(opt, accuracy, max_iter, flags).\n• Declare PUBLIC :: param_optimizer, init_param_optimizer, suggest_kpoint_grid, test_cutoff_convergence, optimize_parameters (latter three as empty stubs).\n• Ensure the module is SERIAL-only: wrap any future MPI calls with pre-processor guards (#ifdef __MPI).",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Add a dummy unit test in test/parameter_optimization/skeleton.f90 that USEs the module and CALLs init_param_optimizer(); compile and run to confirm successful linking."
           },
           {
@@ -230,7 +230,7 @@
               1
             ],
             "details": "• In parameter_optimization.f90 implement FUNCTION suggest_kpoint_grid(cell, spacing) RESULT(grid(3)) where spacing = 2π / cutoff_k.\n• Extract lattice vectors from cell%alat, cell%bm.\n• Compute reciprocal lattice vectors b1,b2,b3 and their norms.\n• For each direction i: n_i = MAX(1, NINT(norm(b_i)/spacing)).\n• Ensure n_i are odd when cell has inversion symmetry if optimize_kpoints%flags%require_gamma_centered.\n• Emit VERBOSE output when io_global%ionode.\n• Return integer array grid(3).",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Unit: Silicon conventional cell (a=5.43 Å) expecting 6×6×6 grid for 0.15 Å⁻¹ spacing; assert equality. Edge cases: 1D chain (large a,b) should yield 1×1×N."
           },
           {
@@ -241,7 +241,7 @@
               1
             ],
             "details": "• Implement FUNCTION test_cutoff_convergence(input_state, opt) RESULT(best_cutoff).\n• Loop cutoff = 30,40,…,120 Ry while iter ≤ opt%max_iterations.\n• For each cutoff: CALL scf_driver(input_state, cutoff, dry_run=.TRUE., energy=e(i)).\n• After first step, compute ΔE = ABS(e(i)-e(i-1)); EXIT when ΔE < opt%target_accuracy.\n• Return cutoff that satisfied criterion; if none, return last tested and flag warning.\n• Store energies and cutoffs in local arrays; if io_global%ionode write a mini-table to output file.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Mock scf_driver with deterministic function E(cutoff)=E0+1/cutoff^2 to avoid heavy computation; verify best_cutoff ≈ sqrt(1/target_accuracy) within tolerance. Test termination on both satisfied and unsatisfied cases."
           },
           {
@@ -253,7 +253,7 @@
               3
             ],
             "details": "• Implement SUBROUTINE optimize_parameters(input_state, opt, out_grid, out_cutoff).\n• IF(opt%optimize_kpoints) CALL suggest_kpoint_grid() and overwrite k_points input variables (kpoint_grid, kpoint_shift).\n• IF(opt%optimize_cutoff) CALL test_cutoff_convergence() and overwrite ecutwfc/ecutrho (ecutrho=4*ecutwfc default).\n• Perform validity checks: throw error if existing k_points defined with automatic optimisation.\n• Wrap the whole routine with IF(.NOT.is_mpi_enabled()) to enforce serial-only; otherwise PRINT warning and RETURN without changes.\n• Propagate chosen parameters to subsequent setup routines via USEd common modules or by updating input_state.\n• Provide verbose summary block printed once with chosen grid and cutoff.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Integration test: feed silicon.in with AUTO_OPTIMIZE flags, run pw.x -dry-run; parse output for new grid/cutoff values; ensure they match expected results from subtasks 2 & 3."
           },
           {
@@ -264,7 +264,7 @@
               4
             ],
             "details": "• Modify PW/src/Makefile: add parameter_optimization.o to pw_OBJS and to compilation order after setup.o.\n• Touch make.depend if required; run make -j to verify successful build.\n• Update Doc/developer.rst with API description and usage example (&AUTO_OPTIMIZE).\n• Add ctest/parameter_optimization directory: (1) skeleton compile test, (2) silicon dry-run end-to-end test, (3) regression ensuring optimisation disabled when flags unset.\n• Register tests in CTestLists.txt.\n• Update CI YAML to run the new tests on PRs.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "CI: make all && ctest -R parameter_optimization — all tests pass. Manual: run pw.x < silicon.in with and without AUTO_OPTIMIZE to confirm behaviour; compare total energy difference < 1 meV between manual 6×6×6/50 Ry and auto-tuned run."
           }
         ]
@@ -279,7 +279,7 @@
         "dependencies": [
           4
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
@@ -287,7 +287,7 @@
             "description": "Add a new namelist &AUTO_OPTIMIZE to input.f90 containing logical flags and numerical parameters that mirror fields of TYPE param_optimizer (e.g., optimize_kpoints, optimize_cutoff, target_accuracy, max_iterations). Set sensible default values with optimize_kpoints and optimize_cutoff defaulting to .FALSE.",
             "dependencies": [],
             "details": "• Locate existing namelist blocks in PW/src/input.f90 and insert the new &AUTO_OPTIMIZE block immediately after &SYSTEM to keep related settings together.\n• Declare local variables for every field; initialise with default values right before the READ statement.\n• Update the master namelist READ statement so the parser can accept &AUTO_OPTIMIZE.\n• Update documentation strings so the keyword parser prints information in -help.\n• Re-run ‘make check-namelists’ (if present) or equivalent script to ensure no collisions with existing keywords.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Compile pw.x and run with a minimal input file that contains only &AUTO_OPTIMIZE/ to confirm no parse error and defaults are picked up. Add non-existent keyword to ensure parser throws an error, verifying validation."
           },
           {
@@ -298,7 +298,7 @@
               1
             ],
             "details": "• In PW/src, add auto_optimize_mod.f90.\n• Define TYPE auto_optimize_t mirroring the param_optimizer configuration (logical :: optimize_kpoints = .FALSE., logical :: optimize_cutoff = .FALSE., real(dp) :: target_accuracy = 1.0e-4, integer :: max_iterations = 6, etc.).\n• Provide CONTAINS section with SUBROUTINE read_auto_optimize(unit) that:\n  – ACCEPTS the input unit number.\n  – Sets defaults then CALLS read_namelist(unit, nml_auto_optimize, iostat, ierr).\n  – On successful read, copies local variables into the module-level instance.\n• Expose PUBLIC :: auto_opt, read_auto_optimize.\n• Add auto_optimize_mod to the makefile dependencies of input.o.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Unit: write a fake input stream in a Fortran test driver, CALL read_auto_optimize(), then ASSERT values against expected defaults and edited values. Use -Ccheck to ensure no uninitialised reads."
           },
           {
@@ -309,7 +309,7 @@
               2
             ],
             "details": "• USE auto_optimize_mod in input.f90.\n• After the usual call sequence that reads &CONTROL, &SYSTEM, etc., INSERT:\n  CALL read_auto_optimize(iu_input)\n  IF (iotk_enabled) CALL iotk_write_namelist('AUTO_OPTIMIZE', auto_opt)   ! if IOTK provenance logging exists.\n• Ensure no circular dependency by making auto_optimize_mod depend only on basic modules (constants, kinds).\n• Update error-handling: if iostat/=0 propagate message through existing error infrastructure.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "End-to-end: run pw.x with sample AUTO_OPTIMIZE block and confirm via a debugger or write-out that auto_opt%optimize_kpoints is .TRUE. when requested."
           },
           {
@@ -320,7 +320,7 @@
               3
             ],
             "details": "• USE auto_optimize_mod, parameter_optimization.\n• Insert logic:\n  IF (auto_opt%optimize_kpoints .OR. auto_opt%optimize_cutoff) THEN\n     CALL optimize_parameters(auto_opt, cell, ecutwfc, ecutrho, kpnts)\n  END IF\n• The optimise routine should return updated values; copy them into existing global variables (ibrav, kpt_grid, ecutwfc, ecutrho) and into cell_control types so downstream code sees new values.\n• Ensure only root rank calls optimise in MPI runs; broadcast updated parameters via MPI_BCAST.\n• Guard with serial compile flag until Task 4’s MPI work is ready (as per project notes).",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Functional: run a silicon test case with optimize_kpoints=.TRUE. and verify SCF initial printout shows new k-point grid; run again with flag .FALSE. to confirm original grid. Regression: confirm total energy identical to non-optimised run when flags disabled."
           },
           {
@@ -331,7 +331,7 @@
               4
             ],
             "details": "• In setup.f90 right after parameters are finalised, INSERT calls to io_global routines (e.g., CALL io_write_line) printing:\n  “--- AUTO_OPTIMIZE REPORT ---”, all flag values, and the final k-point grid & cutoff values.\n• If XML or JSON provenance writers exist, extend them to add <auto_optimize> subtree with same data.\n• Update iotk modules (or JSON writer) schema if required.\n• Add a ‘version’ integer so future schema changes can be detected.",
-            "status": "pending",
+            "status": "done",
             "testStrategy": "Parse standard output with grep/regex in CI to ensure the banner and parameters appear. If XML enabled, validate produced file against updated schema. Compare runs with optimisation disabled to confirm banner indicates ‘disabled’ state."
           }
         ]
@@ -674,7 +674,7 @@
     ],
     "metadata": {
       "created": "2025-07-23T04:10:37.047Z",
-      "updated": "2025-07-24T00:45:26.790Z",
+      "updated": "2025-07-24T19:26:58.809Z",
       "description": "Tasks for master context"
     }
   }

@@ -18,7 +18,7 @@ build/
 *.aux
 *_tmp.f90
 *.TMP
-*.out
+#*.out
 
 bin/*
 FoX

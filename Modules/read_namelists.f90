@@ -2560,6 +2560,20 @@ MODULE read_namelists_module
           CALL rism_checkin( prog )
        END IF
        !
+       ! ... AUTO_OPTIMIZE namelist (only for PW)
+       !
+       IF( prog == 'PW' ) THEN
+          CALL auto_optimize_defaults( )
+          !
+          ios = 0
+          IF( ionode ) THEN
+             READ( unit_loc, auto_optimize, iostat = ios )
+          END IF
+          CALL check_namelist_read(ios, unit_loc, "auto_optimize")
+          !
+          CALL auto_optimize_bcast( )
+       END IF
+       !
        RETURN
        !
      END SUBROUTINE read_namelists
@@ -2598,5 +2612,56 @@ MODULE read_namelists_module
        END IF
        !
      END SUBROUTINE check_namelist_read
+     !
+     !-----------------------------------------------------------------------
+     SUBROUTINE auto_optimize_defaults( )
+       !-----------------------------------------------------------------------
+       !! Variables initialization for Namelist AUTO_OPTIMIZE.
+       !
+       USE input_parameters, ONLY : optimize_kpoints, optimize_cutoff, &
+                                    target_accuracy, max_iterations, &
+                                    kpoint_spacing, cutoff_min, cutoff_max, cutoff_step
+       !
+       IMPLICIT NONE
+       !
+       optimize_kpoints = .FALSE.
+       optimize_cutoff = .FALSE.
+       target_accuracy = 1.0e-4_DP
+       max_iterations = 10
+       kpoint_spacing = 0.15_DP
+       cutoff_min = 30.0_DP
+       cutoff_max = 120.0_DP
+       cutoff_step = 10.0_DP
+       !
+       RETURN
+       !
+     END SUBROUTINE auto_optimize_defaults
+     !
+     !-----------------------------------------------------------------------
+     SUBROUTINE auto_optimize_bcast( )
+       !-----------------------------------------------------------------------
+       !! Broadcast AUTO_OPTIMIZE namelist variables.
+       !
+       USE input_parameters, ONLY : optimize_kpoints, optimize_cutoff, &
+                                    target_accuracy, max_iterations, &
+                                    kpoint_spacing, cutoff_min, cutoff_max, cutoff_step
+       USE io_global,        ONLY : ionode_id
+       USE mp,               ONLY : mp_bcast
+       USE mp_images,        ONLY : intra_image_comm
+       !
+       IMPLICIT NONE
+       !
+       CALL mp_bcast( optimize_kpoints, ionode_id, intra_image_comm )
+       CALL mp_bcast( optimize_cutoff, ionode_id, intra_image_comm )
+       CALL mp_bcast( target_accuracy, ionode_id, intra_image_comm )
+       CALL mp_bcast( max_iterations, ionode_id, intra_image_comm )
+       CALL mp_bcast( kpoint_spacing, ionode_id, intra_image_comm )
+       CALL mp_bcast( cutoff_min, ionode_id, intra_image_comm )
+       CALL mp_bcast( cutoff_max, ionode_id, intra_image_comm )
+       CALL mp_bcast( cutoff_step, ionode_id, intra_image_comm )
+       !
+       RETURN
+       !
+     END SUBROUTINE auto_optimize_bcast
      !
 END MODULE read_namelists_module

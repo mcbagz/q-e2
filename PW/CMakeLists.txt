@@ -19,6 +19,7 @@ set(src_pw
    src/atomic_rho.f90 
    src/atomic_wfc.f90 
    src/atomic_wfc_mod.f90 
+   src/auto_optimize_mod.f90
    src/average_pp.f90 
    src/acfdt_in_pw.f90 
    src/newd_acc.f90 
@@ -143,6 +144,7 @@ set(src_pw
    src/orthoUwfc.f90 
    src/output_tau.f90 
    src/para.f90 
+   src/parameter_optimization.f90
    src/paw_exx.f90 
    src/paw_init.f90 
    src/paw_onecenter.f90 

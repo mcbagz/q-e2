@@ -1753,6 +1753,38 @@ MODULE input_parameters
                           laue_buffer_left, laue_buffer_left_solu, laue_buffer_left_solv, &
                           laue_both_hands, laue_reference, laue_wall, laue_wall_z, laue_wall_rho, &
                           laue_wall_epsilon, laue_wall_sigma, laue_wall_lj6
+
+!=----------------------------------------------------------------------------=!
+!  AUTO_OPTIMIZE Namelist Input Parameters
+!=----------------------------------------------------------------------------=!
+!
+        LOGICAL  :: optimize_kpoints = .FALSE.
+          ! Whether to optimize k-points
+
+        LOGICAL  :: optimize_cutoff = .FALSE.
+          ! Whether to optimize cutoff
+
+        REAL(DP) :: target_accuracy = 1.0e-4_DP
+          ! Target energy accuracy (Ry)
+
+        INTEGER  :: max_iterations = 10
+          ! Maximum optimization iterations
+
+        REAL(DP) :: kpoint_spacing = 0.15_DP
+          ! Target k-point spacing in Bohr^-1
+
+        REAL(DP) :: cutoff_min = 30.0_DP
+          ! Minimum cutoff to test (Ry)
+
+        REAL(DP) :: cutoff_max = 120.0_DP
+          ! Maximum cutoff to test (Ry)
+
+        REAL(DP) :: cutoff_step = 10.0_DP
+          ! Cutoff step size (Ry)
+
+        NAMELIST / auto_optimize / optimize_kpoints, optimize_cutoff, &
+                                   target_accuracy, max_iterations, &
+                                   kpoint_spacing, cutoff_min, cutoff_max, cutoff_step
 !  END manual
 ! ----------------------------------------------------------------------
 

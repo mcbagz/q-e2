@@ -48,6 +48,8 @@ SUBROUTINE setup()
   USE fft_support,        ONLY : good_fft_order
   USE gvect,              ONLY : gcutm, ecutrho
   USE gvecw,              ONLY : gcutw, ecutwfc
+  USE auto_optimize_mod,  ONLY : auto_opt
+  USE parameter_optimization, ONLY : optimize_parameters
   USE gvecs,              ONLY : doublegrid, gcutms, dual
   USE klist,              ONLY : xk, wk, nks, nelec, degauss, lgauss, &
                                  ltetra, lxkcry, nkstot, &
@@ -494,6 +496,43 @@ SUBROUTINE setup()
   ELSE
      !
      gcutms = gcutm
+     !
+  END IF
+  !
+  ! ... Automatic parameter optimization if requested
+  !
+  IF ( auto_opt%optimize_kpoints .OR. auto_opt%optimize_cutoff ) THEN
+     !
+     BLOCK
+        INTEGER :: nk_suggest(3)
+        REAL(DP) :: ecutwfc_opt, ecutrho_opt
+        !
+        CALL optimize_parameters( auto_opt, nk_suggest, ecutwfc_opt, ecutrho_opt )
+        !
+        ! Override cutoffs if optimization was performed
+        IF ( auto_opt%optimize_cutoff ) THEN
+           ecutwfc = ecutwfc_opt
+           ecutrho = ecutrho_opt
+           ! Recalculate gcutm and gcutw with optimized values
+           gcutm = dual * ecutwfc / tpiba2
+           gcutw = ecutwfc / tpiba2
+           IF ( doublegrid ) THEN
+              gcutms = 4.D0 * ecutwfc / tpiba2
+           ELSE
+              gcutms = gcutm
+           END IF
+           WRITE(stdout,'(/,5X,"Using optimized cutoffs:")')
+           WRITE(stdout,'(5X,"ecutwfc =",F7.1," Ry, ecutrho =",F7.1," Ry")') &
+                ecutwfc, ecutrho
+        END IF
+        !
+        ! K-points were already optimized and applied in input.f90
+        IF ( auto_opt%optimize_kpoints ) THEN
+           ! Just note that optimization was performed
+           ! Actual grid info was already printed
+        END IF
+        !
+     END BLOCK
      !
   END IF
   !

@@ -12,10 +12,14 @@ SUBROUTINE stop_run( exit_status )
   !! Remove temporary files needed for restart only if exit_status = 0
   !! (successful execution)
   !
-  USE io_global,          ONLY : ionode
+  USE io_global,          ONLY : ionode, stdout
   USE mp_global,          ONLY : mp_global_end
   USE environment,        ONLY : environment_end
   USE io_files,           ONLY : iuntmp, seqopn
+  USE auto_optimize_mod,  ONLY : auto_opt
+  USE input_parameters,   ONLY : nk1, nk2, nk3
+  USE gvecw,              ONLY : ecutwfc
+  USE gvect,              ONLY : ecutrho
   !
   IMPLICIT NONE
   !
@@ -40,6 +44,22 @@ SUBROUTINE stop_run( exit_status )
   ENDIF
   !
   CALL close_files( lflag )
+  !
+  ! Print AUTO_OPTIMIZE summary if optimization was used
+  IF ( ionode .AND. lflag .AND. &
+       (auto_opt%optimize_kpoints .OR. auto_opt%optimize_cutoff) ) THEN
+     WRITE(stdout,'(/,5X,50("="))')
+     WRITE(stdout,'(5X,"AUTO_OPTIMIZE SUMMARY:")')
+     IF ( auto_opt%optimize_kpoints ) THEN
+        WRITE(stdout,'(5X,"Using optimized k-point grid: ",I3,"x",I3,"x",I3)') &
+             nk1, nk2, nk3
+     END IF
+     IF ( auto_opt%optimize_cutoff ) THEN
+        WRITE(stdout,'(5X,"Using ecutwfc =",F7.1," Ry, ecutrho =",F7.1," Ry")') &
+             ecutwfc, ecutrho
+     END IF
+     WRITE(stdout,'(5X,50("="),/)')
+  END IF
   !
   CALL print_clock_pw()
   !

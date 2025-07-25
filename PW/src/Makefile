@@ -30,6 +30,7 @@ allocate_wfc.o \
 atomic_rho.o \
 atomic_wfc.o \
 atomic_wfc_mod.o \
+auto_optimize_mod.o \
 average_pp.o \
 acfdt_in_pw.o \
 newd_acc.o \
@@ -154,6 +155,7 @@ orthoatwfc.o \
 orthoUwfc.o \
 output_tau.o \
 para.o \
+parameter_optimization.o \
 paw_exx.o \
 paw_init.o \
 paw_onecenter.o \

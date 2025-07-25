@@ -1713,10 +1713,19 @@ SUBROUTINE iosys_end ( )
   USE rism_module,           ONLY : rism_iosys
   USE xdm_module,            ONLY : init_xdm
   USE london_module,         ONLY : init_london
+  USE auto_optimize_mod,     ONLY : read_auto_optimize, apply_kpoint_optimization
   !
   IMPLICIT NONE
   INTEGER :: ibrav_mp
   INTEGER, EXTERNAL :: at2ibrav
+  !
+  ! ... read AUTO_OPTIMIZE namelist configuration
+  !
+  CALL read_auto_optimize()
+  !
+  ! ... apply k-point optimization if requested (needs bg to be set)
+  !
+  CALL apply_kpoint_optimization()
   !
   ! ... set up k-points (may require reciprocal lattice vectors bg)
   !
