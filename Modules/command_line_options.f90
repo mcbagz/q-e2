@@ -157,6 +157,25 @@ CONTAINS
               ENDIF
               IF ( TRIM (checkpoint_file_) == ' ' ) GO TO 15
               narg = narg + 1
+           CASE ( '--ignore-sanity-checks', '-ignore-sanity-checks' )
+              ! Flag will be processed by sanity_config module
+              command_line = TRIM(command_line) // ' ' // TRIM(arg)
+           CASE ( '--sanity-checks-only', '-sanity-checks-only' )
+              ! Flag will be processed by sanity_config module
+              command_line = TRIM(command_line) // ' ' // TRIM(arg)
+           CASE ( '--config', '-config' )
+              ! Flag and its value will be processed by sanity_config module
+              command_line = TRIM(command_line) // ' ' // TRIM(arg)
+              ! Get the config value and add it to command_line
+              IF (read_string) THEN
+                 CALL my_getarg ( input_command_line, narg, arg )
+              ELSE
+                 CALL get_command_argument ( narg, arg )
+              ENDIF
+              IF ( TRIM(arg) /= ' ' ) THEN
+                 command_line = TRIM(command_line) // ' ' // TRIM(arg)
+                 narg = narg + 1
+              END IF
            CASE DEFAULT
               command_line = TRIM(command_line) // ' ' // TRIM(arg)
         END SELECT

@@ -1,0 +1,27 @@
+&control
+    calculation = 'scf'
+    pseudo_dir = 'pseudo/'
+    outdir='./out/'
+    prefix='si_close'
+    tprnfor = .true.
+/
+&system
+    ibrav = 1, 
+    celldm(1) = 10.0,
+    nat = 2, 
+    ntyp = 1,
+    ecutwfc = 30.0
+/
+&electrons
+    conv_thr = 1.0d-8
+/
+&AUTO_OPTIMIZE
+  optimize_kpoints = .false.
+  optimize_cutoff = .false.
+/
+ATOMIC_SPECIES
+ Si  28.086  Si_r.upf
+ATOMIC_POSITIONS (bohr)
+ Si 0.00 0.00 0.00
+ Si 0.50 0.00 0.00  ! Very close - only 0.5 bohr apart
+K_POINTS gamma

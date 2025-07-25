@@ -1,0 +1,171 @@
+name: PP Recommender Tests
+
+on:
+  push:
+    paths:
+      - 'pseudo/pp_database.json'
+      - 'tools/pp_schema.json'
+      - 'upflib/pp_recommender.f90'
+      - 'upflib/test_pp_recommender.f90'
+      - 'external/fson/**'
+      - '.github/workflows/pp-recommender-tests.yml'
+  pull_request:
+    paths:
+      - 'pseudo/pp_database.json'
+      - 'tools/pp_schema.json'
+      - 'upflib/pp_recommender.f90'
+      - 'upflib/test_pp_recommender.f90'
+      - 'external/fson/**'
+      - '.github/workflows/pp-recommender-tests.yml'
+
+jobs:
+  validate-schema:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install jsonschema
+    
+    - name: Validate PP database against schema
+      run: |
+        python tools/validate_pp_db.py \
+          pseudo/pp_database.json \
+          --schema tools/pp_schema.json
+    
+    - name: Check database integrity
+      run: |
+        python tools/check_db_integrity.py pseudo/pp_database.json
+
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [gfortran, ifort]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Intel OneAPI (ifort only)
+      if: matrix.compiler == 'ifort'
+      run: |
+        wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | sudo apt-key add -
+        sudo add-apt-repository "deb https://apt.repos.intel.com/oneapi all main"
+        sudo apt-get update
+        sudo apt-get install intel-oneapi-compiler-fortran
+        source /opt/intel/oneapi/setvars.sh
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          ${{ matrix.compiler == 'gfortran' && 'gfortran' || '' }} \
+          openmpi-bin \
+          libopenmpi-dev \
+          libblas-dev \
+          liblapack-dev \
+          python3-pip
+        pip install jsonschema
+    
+    - name: Configure QE
+      run: |
+        if [ "${{ matrix.compiler }}" == "ifort" ]; then
+          source /opt/intel/oneapi/setvars.sh
+        fi
+        ./configure --enable-openmp
+    
+    - name: Build FSON library
+      run: |
+        cd external/fson
+        make -j2
+        cd ../..
+    
+    - name: Build upflib with PP recommender
+      run: |
+        cd upflib
+        make -j2
+        cd ..
+    
+    - name: Build test program
+      run: |
+        cd upflib
+        ${{ matrix.compiler }} -o test_pp_recommender.x \
+          test_pp_recommender.f90 \
+          -I. -I../Modules -I../external/fson \
+          -L. -L../external/fson \
+          -lupf -lfson \
+          $([ "${{ matrix.compiler }}" == "gfortran" ] && echo "-fopenmp" || echo "-qopenmp")
+        cd ..
+    
+    - name: Run PP recommender tests
+      run: |
+        cd upflib
+        ./test_pp_recommender.x
+        cd ..
+    
+    - name: Performance benchmark
+      run: |
+        cd upflib
+        # Compile benchmark (uses existing benchmark_pp_recommender.f90)
+        ${{ matrix.compiler }} -o benchmark_pp_recommender.x \
+          benchmark_pp_recommender.f90 \
+          -I. -I../Modules -I../external/fson \
+          -L. -L../external/fson \
+          -lupf -lfson \
+          $([ "${{ matrix.compiler }}" == "gfortran" ] && echo "-fopenmp" || echo "-qopenmp")
+        
+        # Run benchmark
+        ./benchmark_pp_recommender.x
+        cd ..
+
+  update-database:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[update-pp-db]')
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install jsonschema requests
+    
+    - name: Update PP database
+      run: |
+        python tools/update_pp_db.py \
+          --input tools/sample_psl_catalog.json \
+          --output pseudo/pp_database_updated.json \
+          --merge pseudo/pp_database.json
+    
+    - name: Validate updated database
+      run: |
+        python tools/validate_pp_db.py \
+          --database pseudo/pp_database_updated.json \
+          --schema tools/pp_schema.json
+    
+    - name: Create pull request
+      if: success()
+      uses: peter-evans/create-pull-request@v4
+      with:
+        commit-message: "Update pseudopotential database"
+        title: "Automated PP database update"
+        body: |
+          This PR updates the pseudopotential database with the latest entries.
+          
+          - Updated from PSL catalog
+          - All entries validated against schema
+          - Quality scores recalculated
+        branch: update-pp-database
+        delete-branch: true

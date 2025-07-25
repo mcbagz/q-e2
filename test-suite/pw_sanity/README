@@ -1,0 +1,51 @@
+Sanity Check System Tests
+========================
+
+This directory contains tests for the sanity check system introduced in QE.
+
+Test Files:
+-----------
+
+1. sanity_close_atoms.in
+   - Tests detection of atoms that are too close together
+   - Two Si atoms only 0.5 bohr (~0.26 Å) apart
+   - Should trigger CRITICAL warning
+
+2. sanity_extreme_cell.in
+   - Tests detection of extreme cell parameters
+   - Cell with 10:1:1 aspect ratio
+   - Should trigger INFO warning about extreme aspect ratio
+
+3. sanity_isolated_atom.in
+   - Tests detection of isolated atoms
+   - Two Si atoms in a large cell, far apart
+   - Should trigger WARNING about isolated atoms
+
+4. sanity_force_continue.in
+   - Tests command-line flag handling
+   - Two Si atoms critically close (0.25 bohr apart)
+   - Used to test --force and --ignore-sanity-checks flags
+
+Running the Tests:
+-----------------
+
+# Normal run (should prompt on critical issues)
+pw.x -input sanity_close_atoms.in
+
+# Skip sanity checks entirely
+pw.x -input sanity_close_atoms.in --ignore-sanity-checks
+
+# Run sanity checks only (no calculation)
+pw.x -input sanity_close_atoms.in --sanity-checks-only
+
+# Change default configuration
+pw.x --config sanity_checks.enabled=false
+
+Expected Behavior:
+-----------------
+
+1. Default behavior: Sanity checks run, warnings shown on stderr, calculation continues
+2. With --ignore-sanity-checks: Skip all checks
+3. With --sanity-checks-only: Run checks and exit without calculation
+4. Configuration changes persist across runs
+5. All sanity check output goes to stderr, not stdout

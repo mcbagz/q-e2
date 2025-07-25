@@ -67,6 +67,8 @@ set(src_modules
     recvec.f90 
     recvec_subs.f90 
     run_info.f90 
+    sanity_config.f90
+    sanity_checks.f90
     space_group.f90 
     set_para_diag.f90 
     set_signal.f90 

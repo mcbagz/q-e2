@@ -101,6 +101,8 @@ SUBROUTINE setup()
   USE sic_mod,            ONLY : init_sic, occ_f2fn, sic_energy
   USE random_numbers,     ONLY : set_random_seed
   USE dynamics_module,    ONLY : control_temp
+  USE sanity_config,      ONLY : load_sanity_config, parse_sanity_flags
+  USE sanity_checks,      ONLY : run_all_checks
 #if defined (__OSCDFT)
   USE plugin_flags,       ONLY : use_oscdft
   USE oscdft_base,        ONLY : oscdft_ctx
@@ -110,7 +112,7 @@ SUBROUTINE setup()
   IMPLICIT NONE
   !
   INTEGER  :: na, is, ierr, ibnd, ik, nrot_, nbnd_, nr3, nk_, natomwfc 
-  LOGICAL  :: magnetic_sym, skip_equivalence=.FALSE.
+  LOGICAL  :: magnetic_sym, skip_equivalence=.FALSE., can_continue
   REAL(DP) :: iocc, ionic_charge, one
   !
   TYPE(output_type)  :: output_obj 
@@ -671,6 +673,19 @@ SUBROUTINE setup()
   IF ( lmd .AND. ( nsym == 2 .AND. .NOT. invsym .OR. nsym > 2 ) &
            .AND. .NOT. ( calc == 'mm' .OR. calc == 'nm' ) ) &
        CALL infomsg( 'setup', 'Dynamics, you should have no symmetries' )
+  !
+  ! ... Load sanity check configuration and parse command-line flags
+  !
+  CALL load_sanity_config()
+  CALL parse_sanity_flags()
+  !
+  ! ... Run sanity checks on input
+  !
+  CALL run_all_checks(can_continue)
+  !
+  IF (.NOT. can_continue) THEN
+     CALL stop_run(1)
+  END IF
   !
   IF ( ltetra ) THEN
      !
