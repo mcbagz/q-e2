@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ../
+      dockerfile: web-ui/docker/Dockerfile.backend
+    container_name: qe-web-backend
+    environment:
+      - QE_BIN_PATH=/opt/qe/bin
+      - QE_PSEUDO_PATH=/opt/qe/pseudo
+      - DATABASE_URL=sqlite:////app/data/qe_simulations.db
+      - CORS_ORIGINS=["*"]
+      - LOG_LEVEL=info
+    volumes:
+      - qe-data:/app/data
+      - qe-simulations:/app/simulations
+      - qe-logs:/app/logs
+    expose:
+      - "8009:8000"
+    networks:
+      - qe-network
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ../
+      dockerfile: web-ui/docker/Dockerfile.frontend
+    container_name: qe-web-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    networks:
+      - qe-network
+    restart: always
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  qe-network:
+    driver: bridge
+
+volumes:
+  qe-data:
+    driver: local
+  qe-simulations:
+    driver: local
+  qe-logs:
+    driver: local
