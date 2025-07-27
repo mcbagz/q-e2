@@ -39,6 +39,27 @@ input_description -distribution {Quantum ESPRESSO} -package PWscf -program pp.x 
         All charge densities integrate to the NUMBER of electrons
         not to the total charge.
         All potentials have the dimension of an energy (e*V, not V).
+
+        @b {NEW: Automated Visualization Mode}
+        
+        pp.x now supports an automated visualization mode that can generate
+        all possible visualizations from a completed calculation without
+        requiring manual input file creation. To use this feature:
+
+        @b {pp.x --visualize-all -in path/to/output.save}
+
+        This mode will:
+        - Automatically analyze the output directory to determine available data
+        - Generate appropriate visualizations for all available quantities:
+          * Charge density (total, spin-up, spin-down)
+          * Total potential (V_bare + V_H + V_xc)
+          * Electron Localization Function (ELF)
+          * Spin density (for spin-polarized calculations)
+        - Save all outputs in XSF format for easy visualization
+        - Provide a summary report of all generated files
+
+        This feature is particularly useful for quickly exploring calculation
+        results without having to write multiple input files.
     }
 
     namelist INPUTPP {

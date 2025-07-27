@@ -14,6 +14,7 @@ addusdens1d.o \
 add_shift_cc.o \
 add_shift_lc.o \
 add_shift_us.o \
+auto_vis_analyzer.o \
 wannier_mod.o \
 chdens_module.o \
 chdens_bspline.o \

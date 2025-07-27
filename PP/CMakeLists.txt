@@ -4,6 +4,7 @@ set(src_pp
     src/add_shift_cc.f90
     src/add_shift_lc.f90
     src/add_shift_us.f90
+    src/auto_vis_analyzer.f90
     src/wannier_mod.f90
     src/chdens_module.f90
     src/chdens_bspline.f90

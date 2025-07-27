@@ -1,0 +1,80 @@
+# Task ID: 5
+# Title: Wire parameter optimiser into input parser and setup
+# Status: done
+# Dependencies: 4
+# Priority: medium
+# Description: Extend input.f90 with AUTO_OPTIMIZE namelist and invoke optimiser in setup.f90.
+# Details:
+• Add &AUTO_OPTIMIZE namelist vars matching TYPE fields; default optimise_kpoints=.FALSE.
+• input.f90: call read_auto_optimize() storing values in module.
+• setup.f90: IF(auto_optimize%optimize_kpoints.OR.optimize_cutoff) CALL optimize_parameters()
+• Override k_points and ecutwfc/ecutrho in cell_control derived types.
+• Echo modifications into pwscf output for provenance.
+
+# Test Strategy:
+Input file with:
+  &AUTO_OPTIMIZE
+     optimize_kpoints=.TRUE.
+  / 
+Verify suggested grid differs from user input and is used.
+Turn off flag, ensure original grid kept.
+End-to-end convergence comparison script in test-suite.
+
+# Subtasks:
+## 1. Define &AUTO_OPTIMIZE namelist variables in input.f90 [done]
+### Dependencies: None
+### Description: Add a new namelist &AUTO_OPTIMIZE to input.f90 containing logical flags and numerical parameters that mirror fields of TYPE param_optimizer (e.g., optimize_kpoints, optimize_cutoff, target_accuracy, max_iterations). Set sensible default values with optimize_kpoints and optimize_cutoff defaulting to .FALSE.
+### Details:
+• Locate existing namelist blocks in PW/src/input.f90 and insert the new &AUTO_OPTIMIZE block immediately after &SYSTEM to keep related settings together.
+• Declare local variables for every field; initialise with default values right before the READ statement.
+• Update the master namelist READ statement so the parser can accept &AUTO_OPTIMIZE.
+• Update documentation strings so the keyword parser prints information in -help.
+• Re-run ‘make check-namelists’ (if present) or equivalent script to ensure no collisions with existing keywords.
+
+## 2. Create auto_optimize_mod module with read_auto_optimize() [done]
+### Dependencies: 5.1
+### Description: Factor parsing logic into a dedicated module auto_optimize_mod that owns a public TYPE(auto_optimize_t) instance and a routine read_auto_optimize() which reads &AUTO_OPTIMIZE from the input stream and populates the instance with defaults or user-supplied overrides.
+### Details:
+• In PW/src, add auto_optimize_mod.f90.
+• Define TYPE auto_optimize_t mirroring the param_optimizer configuration (logical :: optimize_kpoints = .FALSE., logical :: optimize_cutoff = .FALSE., real(dp) :: target_accuracy = 1.0e-4, integer :: max_iterations = 6, etc.).
+• Provide CONTAINS section with SUBROUTINE read_auto_optimize(unit) that:
+  – ACCEPTS the input unit number.
+  – Sets defaults then CALLS read_namelist(unit, nml_auto_optimize, iostat, ierr).
+  – On successful read, copies local variables into the module-level instance.
+• Expose PUBLIC :: auto_opt, read_auto_optimize.
+• Add auto_optimize_mod to the makefile dependencies of input.o.
+
+## 3. Hook read_auto_optimize() into main input parsing workflow [done]
+### Dependencies: 5.2
+### Description: Invoke read_auto_optimize() from input.f90 after existing namelist reads so that optimisation settings are available early during initialisation and globally visible to subsequent stages.
+### Details:
+• USE auto_optimize_mod in input.f90.
+• After the usual call sequence that reads &CONTROL, &SYSTEM, etc., INSERT:
+  CALL read_auto_optimize(iu_input)
+  IF (iotk_enabled) CALL iotk_write_namelist('AUTO_OPTIMIZE', auto_opt)   ! if IOTK provenance logging exists.
+• Ensure no circular dependency by making auto_optimize_mod depend only on basic modules (constants, kinds).
+• Update error-handling: if iostat/=0 propagate message through existing error infrastructure.
+
+## 4. Invoke optimise_parameters() and override k-points / cutoffs in setup.f90 [done]
+### Dependencies: 5.3
+### Description: Modify PW/src/setup.f90 so that, after initial cell and electron structure setup, it evaluates AUTO_OPTIMIZE flags and optionally calls parameter_optimization::optimize_parameters(), then substitutes suggested k-point grid and ecutwfc/rho values in the cell_control derived types before SCF starts.
+### Details:
+• USE auto_optimize_mod, parameter_optimization.
+• Insert logic:
+  IF (auto_opt%optimize_kpoints .OR. auto_opt%optimize_cutoff) THEN
+     CALL optimize_parameters(auto_opt, cell, ecutwfc, ecutrho, kpnts)
+  END IF
+• The optimise routine should return updated values; copy them into existing global variables (ibrav, kpt_grid, ecutwfc, ecutrho) and into cell_control types so downstream code sees new values.
+• Ensure only root rank calls optimise in MPI runs; broadcast updated parameters via MPI_BCAST.
+• Guard with serial compile flag until Task 4’s MPI work is ready (as per project notes).
+
+## 5. Echo optimisation settings and results to pwscf output for provenance [done]
+### Dependencies: 5.4
+### Description: Ensure both user-requested optimisation options and the final chosen parameters are explicitly written to the pwscf standard output and XML data structures so that results are reproducible.
+### Details:
+• In setup.f90 right after parameters are finalised, INSERT calls to io_global routines (e.g., CALL io_write_line) printing:
+  “--- AUTO_OPTIMIZE REPORT ---”, all flag values, and the final k-point grid & cutoff values.
+• If XML or JSON provenance writers exist, extend them to add <auto_optimize> subtree with same data.
+• Update iotk modules (or JSON writer) schema if required.
+• Add a ‘version’ integer so future schema changes can be detected.
+

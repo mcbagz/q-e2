@@ -1,0 +1,85 @@
+# Task ID: 2
+# Title: Integrate signal handling & --resume-from in run_pwscf and command_line_options
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Hook checkpoint manager into program start-up and extend CLI parsing.
+# Details:
+Files: PW/src/run_pwscf.f90, Modules/command_line_options.f90
+• Add CHARACTER(LEN=256) :: resume_file
+• Extend get_command_line_option to recognize --resume-from=<file>
+• At program head:
+    CALL install_signal_handlers()
+    IF(LEN_TRIM(resume_file)>0) CALL load_checkpoint(resume_file)
+• Emit banner: "Resuming from …" and bypass initialisation that checkpoint already covers (read wavefunctions, charge density). Guard with logical resumed_run.
+• Propagate checkpoint filename through global module or COMMON.
+• Update usage() output.
+• Ensure backward compatibility: if flag absent behaviour unchanged.
+
+# Test Strategy:
+CLI unit test: pw.x --help contains flag.
+Resume test: start calc, send SIGUSR1, restart with --resume-from, energy continuity within 1e-10 Ry.
+Regression: existing inputs without flag compile & run.
+MPI: test with mpirun –n 4.
+
+# Subtasks:
+## 1. Extend CLI parser to recognise --resume-from flag [done]
+### Dependencies: None
+### Description: Modify Modules/command_line_options.f90 so that get_command_line_option() detects the new --resume-from=<file> argument and stores its value.
+### Details:
+• In command_line_options.f90, add CHARACTER(LEN=256) :: resume_file = "" and LOGICAL :: resume_flag_present = .FALSE.
+• In the option-scanning loop, match the token that begins with "--resume-from=". Use INDEX(arg,"--resume-from=") == 1 to detect it, then extract the substring after the ‘=’ into resume_file using arg(LEN("--resume-from=")+1:).
+• Set resume_flag_present = .TRUE. when found; leave other existing options untouched.
+• Keep backwards-compatibility: if flag is absent resume_file remains blank.
+• Ensure parser stops treating subsequent CLI items as namelists only if they do not start with "--".
+• Add unit entry point get_resume_file() returning resume_file for external modules.
+
+## 2. Create global resume_state module [done]
+### Dependencies: 2.1
+### Description: Centralise resume related data (resume_file, resumed_run) so that all program units can query it without circular USE dependencies.
+### Details:
+• New file Modules/resume_state.f90 containing:
+   MODULE resume_state
+     CHARACTER(LEN=256) :: resume_file = ""
+     LOGICAL :: resumed_run = .FALSE.
+   END MODULE resume_state
+• In command_line_options.f90, after CLI parsing, USE resume_state and assign resume_state%resume_file = resume_file.
+• Add PUBLIC accessor functions (get_resume_file(), is_resumed_run()) for safer access if preferred.
+• Update the build system to compile the new module before any file that USEs it.
+
+## 3. Hook signal handlers and checkpoint loading in run_pwscf [done]
+### Dependencies: 2.2
+### Description: Modify PW/src/run_pwscf.f90 to register signal handlers and, when a resume file is supplied, load the checkpoint before normal initialisation.
+### Details:
+• USE checkpoint_manager and resume_state modules at the top of run_pwscf.f90.
+• Immediately after argument parsing completes, CALL install_signal_handlers().
+• IF (LEN_TRIM(resume_state%resume_file) > 0) THEN
+     CALL load_checkpoint(TRIM(resume_state%resume_file))
+     resume_state%resumed_run = .TRUE.
+   END IF
+• Capture potential I/O errors from load_checkpoint and abort gracefully with an informative message.
+• Guard this block so it executes on the master MPI rank only; broadcast resume_state%resumed_run to all ranks via MPI_BCAST.
+
+## 4. Bypass redundant initialisation and emit resume banner [done]
+### Dependencies: 2.3
+### Description: Skip expensive I/O (wavefunctions, charge density, etc.) already present in the checkpoint when resumed_run is TRUE, and print a clear banner.
+### Details:
+• Locate sections in run_pwscf.f90 (and any called subroutines) that read charge density, wavefunctions, k-point grids, etc. Protect them with IF (.NOT. resume_state%resumed_run) THEN … END IF.
+• Just after checkpoint loading, WRITE(*,*) "==== Resuming from checkpoint: ", TRIM(resume_state%resume_file).
+• Ensure variables that would normally be initialised by the skipped sections are fully restored by load_checkpoint (verify lists: rho, wf, energies, ecutwfc, etc.). Add ASSERT diagnostics if key arrays remain unallocated after load.
+• Verify logic does not alter cold-start path (resumed_run == .FALSE.).
+
+## 5. Update help/usage output and CI regression tests [done]
+### Dependencies: 2.4
+### Description: Expose the new flag in user documentation, ensure backward compatibility, and extend CI pipeline with resume-flow tests.
+### Details:
+• In command_line_options.f90 usage() routine, append the line:
+  "  --resume-from=<file>   Resume calculation from checkpoint written by SIGUSR1"
+• Update Doc/users_guide.tex and the man page if present.
+• Add CI job steps:
+   1. run pw.x for 3 iterations on a tiny input; send SIGUSR1; capture checkpoint file.
+   2. restart with --resume-from and assert energy continuity (script using grep + awk).
+   3. run pw.x --help and grep for "--resume-from".
+• Maintain existing regression matrix to ensure unchanged behaviour when flag is absent.
+• Tag this feature in CHANGELOG.md.
+

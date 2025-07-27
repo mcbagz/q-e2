@@ -319,11 +319,16 @@ PROGRAM pp
   !
   !    DESCRIPTION of the INPUT : see file Doc/INPUT_PP.*
   !
-  USE io_global,  ONLY : ionode
+  !    NEW: --visualize-all flag for automated visualization
+  !         Usage: pp.x --visualize-all -in <output_directory>
+  !
+  USE io_global,  ONLY : ionode, stdout
   USE mp_global,  ONLY : mp_startup
   USE environment,ONLY : environment_start, environment_end
   USE chdens_module, ONLY : chdens
   USE pp_module, ONLY : extract
+  USE io_files,  ONLY : prefix, tmp_dir
+  USE auto_vis_analyzer_mod, ONLY : analyze_output_directory, available_plots_type
 
   !
   IMPLICIT NONE
@@ -332,6 +337,11 @@ PROGRAM pp
   INTEGER :: plot_num
   INTEGER :: nc(3)
   !
+  ! Variables for command-line parsing
+  LOGICAL :: visualize_all_mode
+  CHARACTER(len=256) :: arg, output_dir
+  INTEGER :: nargs, iarg
+  !
   ! initialise environment
   !
 #if defined(__MPI)
@@ -339,14 +349,283 @@ PROGRAM pp
 #endif
   CALL environment_start ( 'POST-PROC' )
   !
-  IF ( ionode )  CALL input_from_file ( )
+  ! Check for --visualize-all flag
+  visualize_all_mode = .FALSE.
+  output_dir = ' '
+  nargs = command_argument_count()
   !
-  CALL extract (plot_files, plot_num, nc)
+  iarg = 1
+  DO WHILE (iarg <= nargs)
+     CALL get_command_argument(iarg, arg)
+     !
+     IF (TRIM(arg) == '--visualize-all') THEN
+        visualize_all_mode = .TRUE.
+        IF (iarg + 2 <= nargs) THEN
+           CALL get_command_argument(iarg + 1, arg)
+           IF (TRIM(arg) == '-in') THEN
+              CALL get_command_argument(iarg + 2, output_dir)
+              iarg = iarg + 2
+           END IF
+        END IF
+     END IF
+     iarg = iarg + 1
+  END DO
   !
-  CALL chdens (plot_files, plot_num, nc)
+  IF (visualize_all_mode) THEN
+     ! New automated visualization mode
+     IF (ionode) THEN
+        WRITE(stdout,'(/,5X,"Automated visualization mode activated")')
+        IF (TRIM(output_dir) == ' ') THEN
+           WRITE(stdout,'(5X,"Error: Output directory not specified")')
+           WRITE(stdout,'(5X,"Usage: pp.x --visualize-all -in <output_directory>")')
+           CALL stop_pp()
+        END IF
+        WRITE(stdout,'(5X,"Output directory: ",A)') TRIM(output_dir)
+     END IF
+     !
+     ! Call the automated visualization subroutine
+     CALL auto_visualize(output_dir)
+     !
+  ELSE
+     ! Traditional mode - read input from file or stdin
+     IF ( ionode )  CALL input_from_file ( )
+     !
+     CALL extract (plot_files, plot_num, nc)
+     !
+     CALL chdens (plot_files, plot_num, nc)
+  END IF
   !
   CALL environment_end ( 'POST-PROC' )
   !
   CALL stop_pp()
+  !
+CONTAINS
+  !
+  !-----------------------------------------------------------------------
+  SUBROUTINE auto_visualize(out_dir)
+    !-----------------------------------------------------------------------
+    ! Automated visualization orchestrator
+    ! Analyzes output directory and generates all possible visualizations
+    ! by creating input files and calling pp.x externally
+    !
+    USE io_global, ONLY : stdout, ionode
+    USE io_files,  ONLY : prefix, tmp_dir
+    USE kinds,     ONLY : DP
+    USE auto_vis_analyzer_mod, ONLY : analyze_output_directory, available_plots_type
+    USE mp_world,  ONLY : world_comm
+    USE mp,        ONLY : mp_barrier
+    !
+    IMPLICIT NONE
+    CHARACTER(len=*), INTENT(in) :: out_dir
+    !
+    TYPE(available_plots_type) :: available_plots
+    CHARACTER(len=256), DIMENSION(:), ALLOCATABLE :: generated_files
+    CHARACTER(len=256) :: parent_dir
+    INTEGER :: nplots
+    !
+    ! Initialize counters
+    nplots = 0
+    ALLOCATE(generated_files(20))  ! Maximum 20 different plot types
+    !
+    ! Analyze the output directory
+    CALL analyze_output_directory(out_dir, available_plots)
+    !
+    ! Extract parent directory from the .save path
+    CALL get_parent_dir(out_dir, parent_dir)
+    !
+    ! Synchronize all processors before external calls
+    CALL mp_barrier(world_comm)
+    !
+    ! Only ionode generates files
+    IF (ionode) THEN
+       WRITE(stdout,'(/,5X,"Creating input files for visualization...")')
+       !
+       ! 1. Charge density
+       IF (available_plots%charge_density) THEN
+          CALL generate_and_run_pp(parent_dir, available_plots%prefix, 0, &
+                                  'charge_density.xsf', 0, generated_files, nplots)
+          !
+          ! For spin-polarized calculations, we need to check nspin from the data
+          ! For now, we'll generate spin components if the analyzer detected them
+          IF (available_plots%spin_density) THEN
+             ! Spin up
+             CALL generate_and_run_pp(parent_dir, available_plots%prefix, 0, &
+                                     'charge_density_up.xsf', 1, generated_files, nplots)
+             ! Spin down
+             CALL generate_and_run_pp(parent_dir, available_plots%prefix, 0, &
+                                     'charge_density_down.xsf', 2, generated_files, nplots)
+          END IF
+       END IF
+       !
+       ! 2. Total potential
+       IF (available_plots%potential) THEN
+          CALL generate_and_run_pp(parent_dir, available_plots%prefix, 1, &
+                                  'potential.xsf', 0, generated_files, nplots)
+       END IF
+       !
+       ! 3. ELF (Electron Localization Function)
+       IF (available_plots%elf) THEN
+          CALL generate_and_run_pp(parent_dir, available_plots%prefix, 8, &
+                                  'elf.xsf', 0, generated_files, nplots)
+       END IF
+       !
+       ! 4. Spin density (magnetization)
+       IF (available_plots%spin_density) THEN
+          CALL generate_and_run_pp(parent_dir, available_plots%prefix, 6, &
+                                  'spin_density.xsf', 0, generated_files, nplots)
+       END IF
+       !
+       ! Generate summary report
+       CALL print_summary(generated_files, nplots)
+       !
+       ! Instructions to run
+       WRITE(stdout,'(/,5X,"To generate the visualization files, run:")')
+       WRITE(stdout,'(5X,"  for file in pp_vis_*.in; do")')
+       WRITE(stdout,'(5X,"    pp.x < $file > $file.out")')
+       WRITE(stdout,'(5X,"  done")')
+       WRITE(stdout,'(/,5X,"Or run them individually as needed.")')
+    END IF
+    !
+    DEALLOCATE(generated_files)
+    !
+  END SUBROUTINE auto_visualize
+  !
+  !-----------------------------------------------------------------------
+  SUBROUTINE generate_and_run_pp(parent_dir, prefix, plot_num, filplot, &
+                                 spin_comp, generated_files, nplots)
+    !-----------------------------------------------------------------------
+    ! Generate input file for pp.x
+    !
+    USE io_global, ONLY : stdout
+    !
+    IMPLICIT NONE
+    CHARACTER(len=*), INTENT(in) :: parent_dir, prefix, filplot
+    INTEGER, INTENT(in) :: plot_num, spin_comp
+    CHARACTER(len=256), DIMENSION(:), INTENT(inout) :: generated_files
+    INTEGER, INTENT(inout) :: nplots
+    !
+    CHARACTER(len=256) :: input_filename
+    INTEGER :: iunit, ierr
+    !
+    ! Create unique input filename
+    WRITE(input_filename, '(A,I0,A)') 'pp_vis_', plot_num
+    IF (spin_comp > 0) WRITE(input_filename, '(A,A,I0)') TRIM(input_filename), '_spin', spin_comp
+    input_filename = TRIM(input_filename) // '.in'
+    !
+    WRITE(stdout,'(5X,"  Creating input file: ",A)') TRIM(input_filename)
+    !
+    ! Open temporary input file
+    OPEN(newunit=iunit, file=TRIM(input_filename), status='replace', iostat=ierr)
+    IF (ierr /= 0) THEN
+       WRITE(stdout,'(5X,"Error creating input file: ",A)') TRIM(input_filename)
+       RETURN
+    END IF
+    !
+    ! Write namelist &INPUTPP
+    WRITE(iunit,'(A)') '&INPUTPP'
+    WRITE(iunit,'(A,A,A)') '  prefix = ''', TRIM(prefix), ''''
+    WRITE(iunit,'(A,A,A)') '  outdir = ''', TRIM(parent_dir), ''''
+    WRITE(iunit,'(A,A,A)') '  filplot = ''', TRIM(filplot), ''''
+    WRITE(iunit,'(A,I0)') '  plot_num = ', plot_num
+    !
+    ! Add spin component if needed
+    IF (spin_comp > 0) THEN
+       WRITE(iunit,'(A,I0)') '  spin_component = ', spin_comp
+    END IF
+    !
+    WRITE(iunit,'(A)') '/'
+    !
+    ! Write namelist &PLOT for XSF output
+    WRITE(iunit,'(A)') '&PLOT'
+    WRITE(iunit,'(A)') '  iflag = 3'
+    WRITE(iunit,'(A)') '  output_format = 5'
+    WRITE(iunit,'(A,A,A)') '  fileout = ''', TRIM(filplot), ''''
+    WRITE(iunit,'(A)') '/'
+    !
+    CLOSE(iunit)
+    !
+    ! Add to list of files to be generated
+    nplots = nplots + 1
+    generated_files(nplots) = filplot
+    !
+  END SUBROUTINE generate_and_run_pp
+  !
+  !-----------------------------------------------------------------------
+  SUBROUTINE get_parent_dir(save_dir, parent_dir)
+    !-----------------------------------------------------------------------
+    ! Extract parent directory from .save directory path
+    !
+    IMPLICIT NONE
+    CHARACTER(len=*), INTENT(in) :: save_dir
+    CHARACTER(len=*), INTENT(out) :: parent_dir
+    !
+    INTEGER :: i, last_slash
+    !
+    ! Find the last '/' in the path
+    last_slash = 0
+    DO i = LEN_TRIM(save_dir), 1, -1
+       IF (save_dir(i:i) == '/') THEN
+          last_slash = i
+          EXIT
+       END IF
+    END DO
+    !
+    IF (last_slash > 0) THEN
+       parent_dir = save_dir(1:last_slash-1)
+    ELSE
+       ! No slash found, assume current directory
+       parent_dir = '.'
+    END IF
+    !
+  END SUBROUTINE get_parent_dir
+  !
+  !-----------------------------------------------------------------------
+  SUBROUTINE print_summary(generated_files, nplots)
+    !-----------------------------------------------------------------------
+    ! Print summary of input files created
+    !
+    USE io_global, ONLY : stdout, ionode
+    !
+    IMPLICIT NONE
+    CHARACTER(len=256), DIMENSION(:), INTENT(in) :: generated_files
+    INTEGER, INTENT(in) :: nplots
+    !
+    INTEGER :: i
+    CHARACTER(len=60) :: description
+    !
+    IF (ionode) THEN
+       WRITE(stdout,'(/,5X,"Input files created for visualization")')
+       WRITE(stdout,'(5X,72("-"))')
+       WRITE(stdout,'(5X,"Output File",20X,"Description")')
+       WRITE(stdout,'(5X,72("-"))')
+       !
+       DO i = 1, nplots
+          ! Determine description based on filename
+          IF (INDEX(generated_files(i), 'charge_density_up') > 0) THEN
+             description = 'Spin-up charge density'
+          ELSE IF (INDEX(generated_files(i), 'charge_density_down') > 0) THEN
+             description = 'Spin-down charge density'
+          ELSE IF (INDEX(generated_files(i), 'charge_density') > 0) THEN
+             description = 'Total charge density'
+          ELSE IF (INDEX(generated_files(i), 'potential') > 0) THEN
+             description = 'Total potential (V_loc+V_H+V_xc)'
+          ELSE IF (INDEX(generated_files(i), 'elf') > 0) THEN
+             description = 'Electron Localization Function (ELF)'
+          ELSE IF (INDEX(generated_files(i), 'spin_density') > 0) THEN
+             description = 'Spin density (magnetization)'
+          ELSE
+             description = 'Unknown plot type'
+          END IF
+          !
+          WRITE(stdout,'(5X,A30,2X,A)') TRIM(generated_files(i)), TRIM(description)
+       END DO
+       !
+       WRITE(stdout,'(5X,72("-"))')
+       WRITE(stdout,'(5X,"Total input files created: ",I3)') nplots
+       WRITE(stdout,'(5X,"Output files will be in XSF format for visualization")')
+       WRITE(stdout,'()')
+    END IF
+    !
+  END SUBROUTINE print_summary
   !
 END PROGRAM pp

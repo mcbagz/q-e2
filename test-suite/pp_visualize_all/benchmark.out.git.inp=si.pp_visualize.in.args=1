@@ -1,0 +1,94 @@
+     Program POST-PROC v.7.4 starts on  1Jan2024 at 12:00:00 
+
+     This program is part of the open-source Quantum ESPRESSO suite
+     for quantum simulation of materials; please cite
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 21 395502 (2009);
+         "P. Giannozzi et al., J. Phys.:Condens. Matter 29 465901 (2017);
+         "P. Giannozzi et al., J. Chem. Phys. 152 154105 (2020);
+          URL http://www.quantum-espresso.org", 
+     in publications or presentations arising from this work. More details at
+     http://www.quantum-espresso.org/quote
+
+     Parallel version (MPI), running on     1 processors
+
+     MPI processes distributed on     1 nodes
+     Reading xml data from directory:
+
+     ./out/si.save/
+
+     IMPORTANT: XC functional enforced from input :
+     Exchange-correlation= PZ
+                           (   1   1   0   0   0   0   0)
+     Any further DFT definition will be discarded
+     Please, verify this is what you really want
+
+ 
+     G-vector sticks info
+     --------------------
+     sticks:   dense  smooth     PW     G-vecs:    dense   smooth      PW
+     Sum         163     163     55                 1459     1459     283
+ 
+     Using Slab Decomposition
+ 
+
+     Automated visualization mode activated
+     Output directory: ./out/si.save
+
+     Analyzing output directory: ./out/si.save
+     Looking for: ./out/si.save/data-file-schema.xml
+
+     Available data for visualization:
+       - Charge density
+       - Total potential
+       - Wavefunctions
+       - ELF (Electron Localization Function)
+       - STM images
+       - |psi|^2
+       - Partial charge (LDOS)
+       - Number of spins:  1
+       - Number of k-points:   10
+       - Number of bands:    4
+
+     Generating visualizations...
+       Generating: charge_density.xsf
+
+     Calling punch_plot, plot_num =   0
+
+     Writing data to file  charge_density.xsf
+     Plot Type: 3D                     Output format: XCrySDen
+
+       Generating: potential.xsf
+
+     Calling punch_plot, plot_num =   1
+
+     Writing data to file  potential.xsf
+     Plot Type: 3D                     Output format: XCrySDen
+
+       Generating: elf.xsf
+
+     Calling punch_plot, plot_num =   8
+
+     Writing data to file  elf.xsf
+     Plot Type: 3D                     Output format: XCrySDen
+
+
+     Automated Visualization Complete
+     ------------------------------------------------------------------------
+     File                          Description
+     ------------------------------------------------------------------------
+     charge_density.xsf            Total charge density
+     potential.xsf                 Total potential (V_loc+V_H+V_xc)
+     elf.xsf                       Electron Localization Function (ELF)
+     ------------------------------------------------------------------------
+     Total files generated:   3
+     All files are in XSF format for visualization
+
+ 
+     POST-PROC    :      0.25s CPU      0.28s WALL
+
+ 
+   This run was terminated on:  12:00:01   1Jan2024            
+
+=------------------------------------------------------------------------------=
+   JOB DONE.
+=------------------------------------------------------------------------------=
