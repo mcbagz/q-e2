@@ -30,7 +30,9 @@ export class DashboardPage {
 
   async loadSimulations() {
     try {
-      this.simulations = await this.api.getSimulations();
+      const response = await this.api.getSimulations();
+      // Handle the response structure from the API
+      this.simulations = response.simulations || [];
       this.renderSimulations();
     } catch (error) {
       console.error('Failed to load simulations:', error);

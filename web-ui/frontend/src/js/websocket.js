@@ -6,14 +6,19 @@ export class WebSocketClient {
     this.shouldReconnect = true;
   }
 
-  connect() {
+  connect(simulationId = null) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    // WebSocket connections are simulation-specific
+    if (!simulationId) {
+      console.log('No simulation ID provided for WebSocket connection');
+      return;
+    }
+    const wsUrl = `${protocol}//${window.location.host}/api/simulations/${simulationId}/ws`;
 
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {
-      console.log('WebSocket connected');
+      console.log('WebSocket connected for simulation:', simulationId);
       this.emit('connected');
     };
 

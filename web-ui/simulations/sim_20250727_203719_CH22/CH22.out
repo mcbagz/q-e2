@@ -1,0 +1,1 @@
+/opt/qe/bin/pw.x: error while loading shared libraries: libopenblas.so.0: cannot open shared object file: No such file or directory

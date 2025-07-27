@@ -10,11 +10,14 @@ class SimulationCreate(BaseModel):
     
     prefix: str = Field(..., description="Prefix for output files")
     outdir: str = Field(..., description="Output directory")
-    calculation_type: str = Field(default="scf", description="Type of calculation")
+    calculation_type: str = Field(default="scf", description="Type of calculation (scf, relax, vc-relax, md, vc-md, nscf, bands)")
     
     # Structure parameters
     atoms: Optional[List[Dict[str, Any]]] = Field(None, description="Atomic positions and species")
     cell_parameters: Optional[List[List[float]]] = Field(None, description="Cell parameters")
+    
+    # Pseudopotentials
+    pseudopotentials: Optional[Dict[str, str]] = Field(None, description="Custom pseudopotential mapping")
     
     # Calculation parameters  
     ecutwfc: Optional[float] = Field(None, description="Kinetic energy cutoff for wavefunctions (Ry)")
@@ -24,6 +27,12 @@ class SimulationCreate(BaseModel):
     # Advanced parameters
     conv_thr: Optional[float] = Field(1e-6, description="Convergence threshold for self-consistency")
     mixing_beta: Optional[float] = Field(0.7, description="Mixing factor for self-consistency")
+    
+    # AUTO_OPTIMIZE parameters
+    auto_optimize: Optional[Dict[str, Any]] = Field(None, description="AUTO_OPTIMIZE settings")
+    
+    # Additional QE parameters
+    qe_params: Optional[Dict[str, Any]] = Field(None, description="Additional QE parameters for namelists")
     
 
 class SimulationUpdate(BaseModel):

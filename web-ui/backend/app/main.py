@@ -7,6 +7,7 @@ import logging
 
 from app.config import settings
 from app.api import simulations
+from app.api.simulations import pseudo_router
 from app.process_manager import process_manager
 
 # Configure logging
@@ -52,6 +53,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(simulations.router)
+app.include_router(pseudo_router)
 
 
 @app.get("/")

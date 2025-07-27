@@ -12,8 +12,15 @@ RUN apt-get update && apt-get install -y \
     libopenmpi-dev \
     openmpi-bin \
     libfftw3-dev \
+    libfftw3-3 \
     liblapack-dev \
+    liblapack3 \
     libblas-dev \
+    libblas3 \
+    libopenblas-dev \
+    libopenblas0 \
+    libgomp1 \
+    gfortran \
     wget \
     curl \
     && rm -rf /var/lib/apt/lists/*

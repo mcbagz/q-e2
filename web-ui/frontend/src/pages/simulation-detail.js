@@ -113,6 +113,9 @@ export class SimulationDetailPage {
     this.ws.off('simulation_log', this.handleLogMessage);
     this.ws.off('simulation_status', this.handleStatusUpdate);
     this.ws.off('simulation_progress', this.handleProgressUpdate);
+    
+    // Disconnect WebSocket
+    this.ws.disconnect();
   }
 
   setupEventListeners() {
@@ -229,8 +232,13 @@ export class SimulationDetailPage {
   }
 
   subscribeToUpdates() {
-    // Subscribe to this simulation's updates
-    this.ws.subscribeToSimulation(this.simulationId);
+    // Connect WebSocket for this simulation
+    this.ws.connect(this.simulationId);
+    
+    // Wait a bit for connection to establish, then subscribe
+    setTimeout(() => {
+      this.ws.subscribeToSimulation(this.simulationId);
+    }, 100);
 
     // Set up event handlers
     this.handleLogMessage = (data) => {
@@ -352,15 +360,39 @@ export class SimulationDetailPage {
   }
 
   async takeSnapshot() {
-    // TODO: Implement snapshot functionality
-    console.log('Taking snapshot...');
-    this.appendLog('[INFO] Snapshot requested - sending SIGUSR2 signal to QE process');
+    const snapshotBtn = document.getElementById('snapshot-btn');
+    snapshotBtn.disabled = true;
+    snapshotBtn.textContent = 'Taking Snapshot...';
+
+    try {
+      await this.api.takeSnapshot(this.simulationId);
+      this.appendLog('[INFO] Snapshot requested - sending SIGUSR2 signal to QE process');
+    } catch (error) {
+      console.error('Failed to take snapshot:', error);
+      this.showError(error.message);
+    } finally {
+      snapshotBtn.disabled = false;
+      snapshotBtn.textContent = 'Take Snapshot';
+    }
   }
 
   async createCheckpoint() {
-    // TODO: Implement checkpoint functionality
-    console.log('Creating checkpoint...');
-    this.appendLog('[INFO] Checkpoint requested - sending SIGUSR1 signal to QE process');
+    const checkpointBtn = document.getElementById('checkpoint-btn');
+    checkpointBtn.disabled = true;
+    checkpointBtn.textContent = 'Creating Checkpoint...';
+
+    try {
+      await this.api.createCheckpoint(this.simulationId);
+      this.appendLog('[INFO] Checkpoint requested - sending SIGUSR1 signal to QE process');
+      // Update status after checkpoint
+      this.simulation.status = 'checkpointed';
+      this.updateUI();
+    } catch (error) {
+      console.error('Failed to create checkpoint:', error);
+      this.showError(error.message);
+      checkpointBtn.disabled = false;
+      checkpointBtn.textContent = 'Create Checkpoint';
+    }
   }
 
   showError(message) {

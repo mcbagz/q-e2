@@ -15,8 +15,8 @@ class App {
     // Initialize router
     await this.router.init();
     
-    // Connect WebSocket
-    this.ws.connect();
+    // Don't connect WebSocket here - it needs a simulation ID
+    // WebSocket will be connected when viewing a specific simulation
   }
 }
 

@@ -22,7 +22,7 @@ export class ApiClient {
 
   // Simulations API
   async getSimulations() {
-    return this.fetch('/simulations');
+    return this.fetch('/simulations/');
   }
 
   async getSimulation(id) {
@@ -30,7 +30,7 @@ export class ApiClient {
   }
 
   async createSimulation(data) {
-    return this.fetch('/simulations', {
+    return this.fetch('/simulations/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -56,5 +56,22 @@ export class ApiClient {
 
   async getSimulationLogs(id) {
     return this.fetch(`/simulations/${id}/logs`);
+  }
+
+  async takeSnapshot(id) {
+    return this.fetch(`/simulations/${id}/snapshot`, {
+      method: 'POST',
+    });
+  }
+
+  async createCheckpoint(id) {
+    return this.fetch(`/simulations/${id}/checkpoint`, {
+      method: 'POST',
+    });
+  }
+
+  // Pseudopotentials API
+  async getPseudopotentials() {
+    return this.fetch('/pseudopotentials/');
   }
 }

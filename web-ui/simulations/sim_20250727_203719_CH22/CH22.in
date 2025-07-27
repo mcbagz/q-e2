@@ -1,0 +1,37 @@
+&CONTROL
+  calculation = 'scf'
+  prefix = 'CH22'
+  outdir = '/app/simulations/sim_20250727_203719_CH22/out'
+  pseudo_dir = '/opt/qe/pseudo'
+  tprnfor = .true.
+  tstress = .true.
+  verbosity = 'high'
+/
+&SYSTEM
+  ibrav = 0
+  nat = 3
+  ntyp = 2
+  ecutwfc = 50.0
+  ecutrho = 200.0
+/
+&ELECTRONS
+  conv_thr = 0.0001
+  mixing_beta = 0.7
+  electron_maxstep = 100
+/
+&AUTO_OPTIMIZE
+  optimize_ecutwfc = .true.
+/
+CELL_PARAMETERS angstrom
+    5.00000000   0.00000000   0.00000000
+    0.00000000   5.00000000   0.00000000
+    0.00000000   0.00000000   5.00000000
+ATOMIC_SPECIES
+  H   1.0080 H.pbe-rrkjus_psl.1.0.0.UPF
+  C  12.0110 C_3.98148.UPF
+ATOMIC_POSITIONS angstrom
+  C   0.00000000   0.00000000   0.00000000
+  H   1.50000000   0.10000000   0.10000000
+  H   0.10000000   1.50000000   0.10000000
+K_POINTS automatic
+  4 4 4 0 0 0

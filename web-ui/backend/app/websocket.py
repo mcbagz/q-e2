@@ -68,21 +68,23 @@ class ConnectionManager:
             
     async def send_log(self, simulation_id: int, stream: str, line: str):
         """Send log output."""
-        await self.send_message(simulation_id, "log", {
-            "stream": stream,
-            "line": line
+        await self.send_message(simulation_id, "simulation_log", {
+            "simulation_id": simulation_id,
+            "message": line,
+            "stream": stream
         })
         
     async def send_status(self, simulation_id: int, status: str, details: dict = None):
         """Send status update."""
-        data = {"status": status}
+        data = {"simulation_id": simulation_id, "status": status}
         if details:
             data.update(details)
-        await self.send_message(simulation_id, "status", data)
+        await self.send_message(simulation_id, "simulation_status", data)
         
     async def send_progress(self, simulation_id: int, iteration: int, energy: float, converged: bool):
         """Send progress update."""
-        await self.send_message(simulation_id, "progress", {
+        await self.send_message(simulation_id, "simulation_progress", {
+            "simulation_id": simulation_id,
             "iteration": iteration,
             "energy": energy,
             "converged": converged

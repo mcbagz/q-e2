@@ -63,8 +63,13 @@ export class Router {
     }
 
     // Cleanup current page
-    if (this.currentPage && this.currentPage.cleanup) {
-      this.currentPage.cleanup();
+    if (this.currentPage) {
+      if (this.currentPage.cleanup) {
+        this.currentPage.cleanup();
+      }
+      if (this.currentPage.destroy) {
+        this.currentPage.destroy();
+      }
     }
 
     // Create and render new page

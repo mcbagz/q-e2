@@ -35,18 +35,26 @@ class QEProcessManager:
         if not pw_exe.exists():
             raise FileNotFoundError(f"pw.x not found at {pw_exe}")
         
-        # Create command
+        # Create output directory if it doesn't exist
+        sim_dir = input_file.parent
+        out_dir = sim_dir / "out"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create output file path
+        output_file = sim_dir / f"{input_file.stem}.out"
+        
+        # Create command - redirect output to file and tee to stdout
         cmd = [str(pw_exe), "-in", str(input_file)]
         
         # Start process
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # Combine stderr with stdout
             text=True,
             bufsize=1,
             universal_newlines=True,
-            cwd=input_file.parent  # Run in the simulation directory
+            cwd=str(sim_dir)  # Run in the simulation directory
         )
         
         # Store process
@@ -54,13 +62,13 @@ class QEProcessManager:
         
         if output_handler:
             self.output_handlers[simulation_id] = output_handler
-            # Start monitoring output
-            asyncio.create_task(self._monitor_output(simulation_id, process))
+            # Start monitoring output and write to file
+            asyncio.create_task(self._monitor_output(simulation_id, process, output_file))
         
         logger.info(f"Started QE calculation for simulation {simulation_id}, PID: {process.pid}")
         return process.pid
     
-    async def _monitor_output(self, simulation_id: int, process: subprocess.Popen):
+    async def _monitor_output(self, simulation_id: int, process: subprocess.Popen, output_file: Path = None):
         """Monitor process output and call handler."""
         
         handler = self.output_handlers.get(simulation_id)
@@ -68,6 +76,11 @@ class QEProcessManager:
             return
         
         try:
+            # Open output file for writing if provided
+            outfile = None
+            if output_file:
+                outfile = open(output_file, 'w', buffering=1)
+            
             # Read stdout line by line
             while True:
                 line = process.stdout.readline()
@@ -75,15 +88,14 @@ class QEProcessManager:
                     break
                     
                 if line:
+                    # Write to file if provided
+                    if outfile:
+                        outfile.write(line)
+                        outfile.flush()
+                    
+                    # Send to handler
                     await handler("stdout", line.strip())
                     
-            # Get any remaining stderr
-            stderr = process.stderr.read()
-            if stderr:
-                for line in stderr.strip().split('\n'):
-                    if line:
-                        await handler("stderr", line)
-                        
             # Process finished
             await handler("status", f"Process finished with code {process.returncode}")
             
@@ -91,6 +103,10 @@ class QEProcessManager:
             logger.error(f"Error monitoring output for simulation {simulation_id}: {e}")
             await handler("error", str(e))
         finally:
+            # Close output file
+            if outfile:
+                outfile.close()
+                
             # Cleanup
             self.processes.pop(simulation_id, None)
             self.output_handlers.pop(simulation_id, None)
