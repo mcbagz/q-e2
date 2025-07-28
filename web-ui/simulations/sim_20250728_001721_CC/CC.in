@@ -1,0 +1,38 @@
+&CONTROL
+  calculation = 'scf'
+  prefix = 'CC'
+  outdir = '/app/simulations/sim_20250728_001721_CC/out'
+  pseudo_dir = '/opt/qe/pseudo'
+  tprnfor = .true.
+  tstress = .true.
+  verbosity = 'high'
+/
+&SYSTEM
+  ibrav = 0
+  nat = 2
+  ntyp = 1
+  ecutwfc = 50.0
+  ecutrho = 200.0
+  occupations = 'smearing'
+  smearing = 'gaussian'
+  degauss = 0.01
+/
+&ELECTRONS
+  conv_thr = 1e-06
+  mixing_beta = 0.7
+  electron_maxstep = 100
+/
+&AUTO_OPTIMIZE
+  optimize_cutoff = .true.
+/
+CELL_PARAMETERS angstrom
+    2.40000000   0.00000000   0.00000000
+   -1.20000000   2.07846097   0.00000000
+    0.00000000   0.00000000  20.00000000
+ATOMIC_SPECIES
+  C  12.0110 C_3.98148.UPF
+ATOMIC_POSITIONS angstrom
+  C   0.00000000   0.00000000  10.00000000
+  C  -0.00120000   1.38633347  10.00000000
+K_POINTS automatic
+  4 4 4 0 0 0

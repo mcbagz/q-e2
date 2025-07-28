@@ -72,6 +72,12 @@ export class WebSocketClient {
       case 'simulation_progress':
         this.emit('simulation_progress', data);
         break;
+      case 'simulation_accuracy':
+        this.emit('simulation_accuracy', data);
+        break;
+      case 'simulation_cpu_time':
+        this.emit('simulation_cpu_time', data);
+        break;
       default:
         console.log('Unknown message type:', type);
     }

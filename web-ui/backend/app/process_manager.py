@@ -50,7 +50,7 @@ class QEProcessManager:
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # Combine stderr with stdout
+            stderr=subprocess.PIPE,  # Keep stderr separate
             text=True,
             bufsize=1,
             universal_newlines=True,
@@ -76,26 +76,42 @@ class QEProcessManager:
             return
         
         try:
-            # Open output file for writing if provided
+            # Open output files for writing
             outfile = None
+            errfile = None
             if output_file:
                 outfile = open(output_file, 'w', buffering=1)
+                # Create stderr file with .err extension
+                err_file_path = output_file.with_suffix('.err')
+                errfile = open(err_file_path, 'w', buffering=1)
             
-            # Read stdout line by line
-            while True:
-                line = process.stdout.readline()
-                if not line and process.poll() is not None:
-                    break
+            # Create tasks for monitoring both stdout and stderr
+            async def read_stream(stream, stream_name):
+                while True:
+                    line = stream.readline()
+                    if not line:
+                        break
                     
-                if line:
-                    # Write to file if provided
-                    if outfile:
+                    # Write to respective files
+                    if stream_name == "stdout" and outfile:
                         outfile.write(line)
                         outfile.flush()
+                    elif stream_name == "stderr" and errfile:
+                        errfile.write(line)
+                        errfile.flush()
                     
                     # Send to handler
-                    await handler("stdout", line.strip())
-                    
+                    await handler(stream_name, line.strip())
+            
+            # Monitor both streams concurrently
+            await asyncio.gather(
+                read_stream(process.stdout, "stdout"),
+                read_stream(process.stderr, "stderr")
+            )
+            
+            # Wait for process to finish
+            process.wait()
+            
             # Process finished
             await handler("status", f"Process finished with code {process.returncode}")
             
@@ -103,9 +119,11 @@ class QEProcessManager:
             logger.error(f"Error monitoring output for simulation {simulation_id}: {e}")
             await handler("error", str(e))
         finally:
-            # Close output file
+            # Close output files
             if outfile:
                 outfile.close()
+            if errfile:
+                errfile.close()
                 
             # Cleanup
             self.processes.pop(simulation_id, None)

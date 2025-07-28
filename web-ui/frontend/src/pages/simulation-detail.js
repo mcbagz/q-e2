@@ -28,7 +28,7 @@ export class SimulationDetailPage {
           <div class="lg:col-span-2">
             <div class="card">
               <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-semibold">Output Logs</h2>
+                <h2 class="text-xl font-semibold">Logs</h2>
                 <div class="flex items-center space-x-2">
                   <label class="flex items-center text-sm">
                     <input
@@ -103,19 +103,70 @@ export class SimulationDetailPage {
     // Load simulation data
     await this.loadSimulation();
     
-    // Subscribe to WebSocket events
-    this.subscribeToUpdates();
+    // Start polling if simulation is running
+    if (this.simulation && this.simulation.status === 'running') {
+      this.startPolling();
+    }
   }
 
   cleanup() {
-    // Unsubscribe from WebSocket events
-    this.ws.unsubscribeFromSimulation(this.simulationId);
-    this.ws.off('simulation_log', this.handleLogMessage);
-    this.ws.off('simulation_status', this.handleStatusUpdate);
-    this.ws.off('simulation_progress', this.handleProgressUpdate);
-    
-    // Disconnect WebSocket
-    this.ws.disconnect();
+    // Stop polling
+    this.stopPolling();
+  }
+
+  startPolling() {
+    // Poll every 2 seconds
+    this.pollingInterval = setInterval(async () => {
+      await this.pollStatus();
+    }, 2000);
+  }
+
+  stopPolling() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+    }
+  }
+
+  async pollStatus() {
+    try {
+      const updatedSimulation = await this.api.getSimulation(this.simulationId);
+      
+      // Check if status changed
+      if (updatedSimulation.status !== this.simulation.status) {
+        this.simulation = updatedSimulation;
+        this.updateUI();
+        
+        // If no longer running, stop polling and load final logs
+        if (updatedSimulation.status !== 'running') {
+          this.stopPolling();
+          await this.loadLogs();
+          
+          // Show completion message
+          if (updatedSimulation.status === 'completed') {
+            this.appendLog('[COMPLETED] Simulation finished successfully', 'status');
+          } else if (updatedSimulation.status === 'error') {
+            this.appendLog('[ERROR] Simulation failed', 'status');
+          }
+        }
+      }
+      
+      // Update progress info if simulation is running
+      if (updatedSimulation.status === 'running') {
+        // Update total energy if changed
+        if (updatedSimulation.total_energy && updatedSimulation.total_energy !== this.simulation.total_energy) {
+          this.simulation.total_energy = updatedSimulation.total_energy;
+          if (!this.progressData) this.progressData = {};
+          this.progressData.energy = updatedSimulation.total_energy;
+          this.renderProgress();
+        }
+        
+        // Periodically reload logs while running
+        await this.loadLogs();
+      }
+    } catch (error) {
+      console.error('Polling error:', error);
+    }
   }
 
   setupEventListeners() {
@@ -145,14 +196,22 @@ export class SimulationDetailPage {
       this.simulation = await this.api.getSimulation(this.simulationId);
       this.updateUI();
       
-      // Load existing logs if available
-      const logs = await this.api.getSimulationLogs(this.simulationId);
-      if (logs && logs.content) {
-        this.displayLogs(logs.content);
-      }
+      // Load logs
+      await this.loadLogs();
     } catch (error) {
       console.error('Failed to load simulation:', error);
       this.showError(error.message);
+    }
+  }
+
+  async loadLogs() {
+    try {
+      const logs = await this.api.getSimulationLogs(this.simulationId);
+      if (logs) {
+        this.displayLogs(logs.stdout || logs.logs || '', logs.stderr || '');
+      }
+    } catch (error) {
+      console.error('Failed to load logs:', error);
     }
   }
 
@@ -171,7 +230,8 @@ export class SimulationDetailPage {
       'running': 'text-blue-800',
       'completed': 'text-green-800',
       'error': 'text-red-800',
-      'stopped': 'text-yellow-800'
+      'stopped': 'text-yellow-800',
+      'checkpointed': 'text-purple-800'
     };
     
     infoDiv.innerHTML = `
@@ -216,71 +276,63 @@ export class SimulationDetailPage {
       stopBtn.disabled = false;
       snapshotBtn.disabled = false;
       checkpointBtn.disabled = false;
+    } else if (this.simulation.status === 'checkpointed' && this.simulation.checkpoint_available) {
+      runBtn.disabled = false;
+      runBtn.textContent = 'Resume from Checkpoint';
+      runBtn.onclick = () => this.resumeSimulation();
+      stopBtn.disabled = true;
+      snapshotBtn.disabled = true;
+      checkpointBtn.disabled = true;
     } else if (this.simulation.status === 'draft' || this.simulation.status === 'stopped') {
       runBtn.disabled = false;
       runBtn.textContent = 'Run Simulation';
+      runBtn.onclick = () => this.runSimulation();
       stopBtn.disabled = true;
       snapshotBtn.disabled = true;
       checkpointBtn.disabled = true;
     } else {
       runBtn.disabled = false;
       runBtn.textContent = 'Re-run Simulation';
+      runBtn.onclick = () => this.runSimulation();
       stopBtn.disabled = true;
       snapshotBtn.disabled = true;
       checkpointBtn.disabled = true;
     }
   }
 
-  subscribeToUpdates() {
-    // Connect WebSocket for this simulation
-    this.ws.connect(this.simulationId);
+
+  displayLogs(stdout, stderr = '') {
+    // Clear existing content
+    this.logContainer.innerHTML = '';
     
-    // Wait a bit for connection to establish, then subscribe
-    setTimeout(() => {
-      this.ws.subscribeToSimulation(this.simulationId);
-    }, 100);
-
-    // Set up event handlers
-    this.handleLogMessage = (data) => {
-      if (data.simulation_id === this.simulationId) {
-        this.appendLog(data.message);
-      }
-    };
-
-    this.handleStatusUpdate = (data) => {
-      if (data.simulation_id === this.simulationId) {
-        this.simulation.status = data.status;
-        this.updateUI();
-      }
-    };
-
-    this.handleProgressUpdate = (data) => {
-      if (data.simulation_id === this.simulationId) {
-        this.updateProgress(data);
-      }
-    };
-
-    this.ws.on('simulation_log', this.handleLogMessage);
-    this.ws.on('simulation_status', this.handleStatusUpdate);
-    this.ws.on('simulation_progress', this.handleProgressUpdate);
-  }
-
-  displayLogs(content) {
-    this.logContainer.innerHTML = `<pre>${this.escapeHtml(content)}</pre>`;
+    // Only display stderr (which contains the progress messages)
+    if (stderr && stderr.trim()) {
+      const logsPre = document.createElement('pre');
+      logsPre.className = 'text-gray-100';
+      logsPre.textContent = stderr;
+      this.logContainer.appendChild(logsPre);
+    } else {
+      this.logContainer.innerHTML = '<p class="text-gray-500">No logs available yet...</p>';
+    }
+    
     if (this.autoScroll) {
       this.logContainer.scrollTop = this.logContainer.scrollHeight;
     }
   }
 
-  appendLog(message) {
+  appendLog(message, stream = 'stdout') {
     const wasAtBottom = this.logContainer.scrollHeight - this.logContainer.scrollTop === this.logContainer.clientHeight;
-    
-    if (this.logContainer.querySelector('.text-gray-500')) {
-      this.logContainer.innerHTML = '';
-    }
     
     const logLine = document.createElement('div');
     logLine.textContent = message;
+    
+    // Style based on stream type
+    if (stream === 'stderr') {
+      logLine.classList.add('text-yellow-400', 'font-semibold');
+    } else if (stream === 'status') {
+      logLine.classList.add('text-blue-400', 'font-semibold', 'mt-2');
+    }
+    
     this.logContainer.appendChild(logLine);
     
     if (this.autoScroll || wasAtBottom) {
@@ -293,31 +345,70 @@ export class SimulationDetailPage {
   }
 
   updateProgress(data) {
+    if (!this.progressData) {
+      this.progressData = {};
+    }
+    
+    // Update stored progress data
+    if (data.iteration !== undefined) this.progressData.iteration = data.iteration;
+    if (data.energy !== undefined) this.progressData.energy = data.energy;
+    if (data.converged !== undefined) this.progressData.converged = data.converged;
+    
+    this.renderProgress();
+  }
+
+  updateAccuracy(accuracy) {
+    if (!this.progressData) {
+      this.progressData = {};
+    }
+    this.progressData.accuracy = accuracy;
+    this.renderProgress();
+  }
+
+  updateCpuTime(cpuTime) {
+    if (!this.progressData) {
+      this.progressData = {};
+    }
+    this.progressData.cpuTime = cpuTime;
+    this.renderProgress();
+  }
+
+  renderProgress() {
     const progressDiv = document.getElementById('progress-info');
+    const data = this.progressData || {};
+    
     progressDiv.innerHTML = `
       <div class="space-y-2">
-        ${data.iteration ? `
+        ${data.iteration !== undefined ? `
           <div>
             <span class="font-medium">Iteration:</span>
             <span>${data.iteration}</span>
           </div>
         ` : ''}
-        ${data.energy ? `
+        ${data.energy !== undefined ? `
           <div>
             <span class="font-medium">Total Energy:</span>
-            <span>${data.energy} Ry</span>
+            <span class="font-mono">${data.energy.toFixed(8)} Ry</span>
           </div>
         ` : ''}
-        ${data.convergence ? `
+        ${data.accuracy !== undefined ? `
           <div>
-            <span class="font-medium">Convergence:</span>
-            <span>${data.convergence}</span>
+            <span class="font-medium">SCF Accuracy:</span>
+            <span class="font-mono">${data.accuracy.toExponential(2)} Ry</span>
           </div>
         ` : ''}
-        ${data.time_elapsed ? `
+        ${data.converged !== undefined ? `
           <div>
-            <span class="font-medium">Time Elapsed:</span>
-            <span>${data.time_elapsed}</span>
+            <span class="font-medium">Converged:</span>
+            <span class="${data.converged ? 'text-green-600' : 'text-orange-600'} font-medium">
+              ${data.converged ? 'Yes' : 'Not yet'}
+            </span>
+          </div>
+        ` : ''}
+        ${data.cpuTime !== undefined ? `
+          <div>
+            <span class="font-medium">CPU Time:</span>
+            <span>${data.cpuTime.toFixed(1)} seconds</span>
           </div>
         ` : ''}
       </div>
@@ -334,11 +425,36 @@ export class SimulationDetailPage {
       this.simulation.status = 'running';
       this.updateUI();
       this.clearLogs();
+      this.appendLog('[STARTED] Simulation is running...', 'status');
+      
+      // Start polling for status updates
+      this.startPolling();
     } catch (error) {
       console.error('Failed to start simulation:', error);
       this.showError(error.message);
       runBtn.disabled = false;
       runBtn.textContent = 'Run Simulation';
+    }
+  }
+
+  async resumeSimulation() {
+    const runBtn = document.getElementById('run-btn');
+    runBtn.disabled = true;
+    runBtn.textContent = 'Resuming...';
+
+    try {
+      await this.api.resumeSimulation(this.simulationId);
+      this.simulation.status = 'running';
+      this.updateUI();
+      this.appendLog('[RESUMED] Simulation resumed from checkpoint', 'status');
+      
+      // Start polling for status updates
+      this.startPolling();
+    } catch (error) {
+      console.error('Failed to resume simulation:', error);
+      this.showError(error.message);
+      runBtn.disabled = false;
+      runBtn.textContent = 'Resume from Checkpoint';
     }
   }
 
@@ -393,6 +509,12 @@ export class SimulationDetailPage {
       checkpointBtn.disabled = false;
       checkpointBtn.textContent = 'Create Checkpoint';
     }
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   showError(message) {

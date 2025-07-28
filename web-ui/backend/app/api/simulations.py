@@ -154,11 +154,41 @@ async def start_simulation(
     
     # Create output handler
     async def output_handler(stream: str, line: str):
+        # Handle status messages (process completion)
+        if stream == "status":
+            if "Process finished" in line:
+                # Extract return code
+                return_code = 0
+                match = re.search(r"code (\d+)", line)
+                if match:
+                    return_code = int(match.group(1))
+                
+                # Update simulation status
+                if return_code == 0:
+                    simulation.status = "completed"
+                else:
+                    simulation.status = "error"
+                    simulation.error_log = f"Process exited with code {return_code}"
+                
+                simulation.end_time = datetime.utcnow()
+                db.commit()
+                
+                await connection_manager.send_status(simulation.id, simulation.status)
+                return
+            elif stream == "error":
+                simulation.status = "error"
+                simulation.error_log = line
+                simulation.end_time = datetime.utcnow()
+                db.commit()
+                await connection_manager.send_status(simulation.id, "error")
+                return
+        
         # Send to WebSocket
         await connection_manager.send_log(simulation.id, stream, line)
         
-        # Parse output for progress
-        if stream == "stdout":
+        # Parse output for progress - check both stdout and stderr
+        # QE sends important progress info to stderr
+        if stream in ["stdout", "stderr"]:
             # Check for energy convergence
             energy_match = re.search(r"total energy\s*=\s*([-\d.]+)\s*Ry", line)
             if energy_match:
@@ -173,6 +203,30 @@ async def start_simulation(
                 await connection_manager.send_progress(
                     simulation.id, iteration, simulation.total_energy or 0.0, False
                 )
+            
+            # Check for SCF convergence achieved
+            if "convergence has been achieved" in line:
+                await connection_manager.send_progress(
+                    simulation.id, 0, simulation.total_energy or 0.0, True
+                )
+                
+            # Parse estimated accuracy
+            accuracy_match = re.search(r"estimated scf accuracy\s*<\s*([-\d.E]+)\s*Ry", line)
+            if accuracy_match:
+                accuracy = float(accuracy_match.group(1))
+                await connection_manager.send_message(simulation.id, "simulation_accuracy", {
+                    "simulation_id": simulation.id,
+                    "accuracy": accuracy
+                })
+                
+            # Parse CPU time
+            cpu_time_match = re.search(r"total cpu time spent up to now is\s*([\d.]+)\s*secs", line)
+            if cpu_time_match:
+                cpu_time = float(cpu_time_match.group(1))
+                await connection_manager.send_message(simulation.id, "simulation_cpu_time", {
+                    "simulation_id": simulation.id,
+                    "cpu_time": cpu_time
+                })
     
     # Start calculation
     input_file = Path(simulation.outdir) / f"{simulation.prefix}.in"
@@ -231,16 +285,30 @@ async def get_simulation_logs(
     if not simulation:
         raise HTTPException(status_code=404, detail="Simulation not found")
     
-    # Read output log file if it exists
+    # Read output and error log files if they exist
     output_file = Path(simulation.outdir) / f"{simulation.prefix}.out"
+    error_file = Path(simulation.outdir) / f"{simulation.prefix}.err"
+    
+    stdout_content = ""
+    stderr_content = ""
+    
     if output_file.exists():
         try:
-            logs = output_file.read_text()
-            return {"logs": logs}
+            stdout_content = output_file.read_text()
         except Exception as e:
-            return {"logs": f"Error reading logs: {str(e)}"}
-    else:
-        return {"logs": simulation.output_log or "No logs available yet"}
+            stdout_content = f"Error reading stdout: {str(e)}"
+    
+    if error_file.exists():
+        try:
+            stderr_content = error_file.read_text()
+        except Exception as e:
+            stderr_content = f"Error reading stderr: {str(e)}"
+    
+    return {
+        "stdout": stdout_content or "No stdout output available",
+        "stderr": stderr_content or "No stderr output available",
+        "logs": stdout_content  # Keep for backward compatibility
+    }
 
 
 @router.websocket("/{simulation_id}/ws")
@@ -299,11 +367,156 @@ async def create_checkpoint(
         await connection_manager.send_log(simulation.id, "info", "[CHECKPOINT] Sent SIGUSR1 signal to QE process")
         simulation.status = "checkpointed"
         simulation.end_time = datetime.utcnow()
+        simulation.checkpoint_available = True
+        simulation.last_checkpoint = datetime.utcnow()
         db.commit()
         await connection_manager.send_status(simulation.id, "checkpointed")
         return {"status": "checkpoint_created"}
     else:
         raise HTTPException(status_code=500, detail="Failed to send checkpoint signal")
+
+
+@router.post("/{simulation_id}/resume")
+async def resume_simulation(
+    simulation_id: int,
+    db: Session = Depends(get_db)
+):
+    """Resume a simulation from checkpoint."""
+    
+    simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
+    if not simulation:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    
+    if not simulation.checkpoint_available:
+        raise HTTPException(status_code=400, detail="No checkpoint available for this simulation")
+    
+    if simulation.status == "running":
+        raise HTTPException(status_code=400, detail="Simulation is already running")
+    
+    # Create a new input file with restart_mode = 'restart'
+    input_gen = QEInputGenerator()
+    
+    # Parse the original input file to get parameters
+    original_input = simulation.input_file
+    
+    # Add restart_mode to the input
+    # Simple approach: modify the &CONTROL section
+    lines = original_input.split('\n')
+    new_lines = []
+    in_control = False
+    restart_added = False
+    
+    for line in lines:
+        if '&CONTROL' in line.upper():
+            in_control = True
+            new_lines.append(line)
+        elif in_control and not restart_added and (line.strip().startswith('/') or not line.strip()):
+            # Add restart_mode before the end of CONTROL namelist
+            new_lines.append("  restart_mode = 'restart'")
+            restart_added = True
+            new_lines.append(line)
+            in_control = False
+        else:
+            # Remove any existing restart_mode line
+            if 'restart_mode' not in line.lower():
+                new_lines.append(line)
+    
+    # Write the modified input file
+    restart_input = '\n'.join(new_lines)
+    sim_dir = Path(simulation.outdir)
+    restart_input_file = sim_dir / f"{simulation.prefix}_restart.in"
+    restart_input_file.write_text(restart_input)
+    
+    # Create output handler (same as start_simulation)
+    async def output_handler(stream: str, line: str):
+        # Handle status messages (process completion)
+        if stream == "status":
+            if "Process finished" in line:
+                # Extract return code
+                return_code = 0
+                match = re.search(r"code (\d+)", line)
+                if match:
+                    return_code = int(match.group(1))
+                
+                # Update simulation status
+                if return_code == 0:
+                    simulation.status = "completed"
+                else:
+                    simulation.status = "error"
+                    simulation.error_log = f"Process exited with code {return_code}"
+                
+                simulation.end_time = datetime.utcnow()
+                db.commit()
+                
+                await connection_manager.send_status(simulation.id, simulation.status)
+                return
+            elif stream == "error":
+                simulation.status = "error"
+                simulation.error_log = line
+                simulation.end_time = datetime.utcnow()
+                db.commit()
+                await connection_manager.send_status(simulation.id, "error")
+                return
+        
+        await connection_manager.send_log(simulation.id, stream, line)
+        
+        if stream in ["stdout", "stderr"]:
+            energy_match = re.search(r"total energy\s*=\s*([-\d.]+)\s*Ry", line)
+            if energy_match:
+                energy = float(energy_match.group(1))
+                simulation.total_energy = energy
+                db.commit()
+                
+            iter_match = re.search(r"iteration #\s*(\d+)", line)
+            if iter_match:
+                iteration = int(iter_match.group(1))
+                await connection_manager.send_progress(
+                    simulation.id, iteration, simulation.total_energy or 0.0, False
+                )
+            
+            if "convergence has been achieved" in line:
+                await connection_manager.send_progress(
+                    simulation.id, 0, simulation.total_energy or 0.0, True
+                )
+                
+            accuracy_match = re.search(r"estimated scf accuracy\s*<\s*([-\d.E]+)\s*Ry", line)
+            if accuracy_match:
+                accuracy = float(accuracy_match.group(1))
+                await connection_manager.send_message(simulation.id, "simulation_accuracy", {
+                    "simulation_id": simulation.id,
+                    "accuracy": accuracy
+                })
+                
+            cpu_time_match = re.search(r"total cpu time spent up to now is\s*([\d.]+)\s*secs", line)
+            if cpu_time_match:
+                cpu_time = float(cpu_time_match.group(1))
+                await connection_manager.send_message(simulation.id, "simulation_cpu_time", {
+                    "simulation_id": simulation.id,
+                    "cpu_time": cpu_time
+                })
+    
+    # Start calculation with restart input
+    try:
+        pid = await process_manager.start_calculation(
+            simulation.id, restart_input_file, output_handler
+        )
+        
+        # Update simulation
+        simulation.status = "running"
+        simulation.pid = pid
+        simulation.start_time = datetime.utcnow()
+        db.commit()
+        
+        await connection_manager.send_status(simulation.id, "running", {"pid": pid})
+        await connection_manager.send_log(simulation.id, "info", "[RESUME] Resuming from checkpoint")
+        
+        return {"status": "resumed", "pid": pid}
+        
+    except Exception as e:
+        simulation.status = "error"
+        simulation.error_log = str(e)
+        db.commit()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{simulation_id}")

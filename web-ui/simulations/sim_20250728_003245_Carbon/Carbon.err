@@ -1,0 +1,15 @@
+
+     Checkpoint signal handlers installed successfully
+       - Send SIGUSR1 (kill -USR1 <pid>) for soft pause with checkpoint
+       - Send SIGUSR2 (kill -USR2 <pid>) for status snapshot
+
+     ======================================================================
+     SANITY CHECK REPORT
+     ======================================================================
+     Found   1 issue(s):   0 critical,   0 warning(s),   1 info
+     ----------------------------------------------------------------------
+
+       (i) [INFO]      Atom    1 is very close to origin (0,0,0)
+           → If exact symmetry is desired, set position exactly
+     ======================================================================
+

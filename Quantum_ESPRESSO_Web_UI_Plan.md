@@ -58,9 +58,9 @@ The primary vision is to transform the Quantum ESPRESSO (QE) user experience fro
 ## 3. Technical Stack
 
 ### 3.1. Frontend (User Interface)
-*   **Framework:** React (for building a dynamic and component-based UI).
+*   **Framework:** HTML/CSS/JS static site. Vite to build bundle.
 *   **3D Visualization:** Three.js (for interactive structure viewing and rendering volumetric data).
-*   **UI Components:** Material-UI (for a consistent and modern Material Design aesthetic) or Tailwind CSS (for highly customizable styling).
+*   **UI Components:** Tailwind CSS (for highly customizable styling).
 *   **Charting Libraries (2D):** Chart.js or Plotly.js (for rendering DOS, band structures, and other 2D data).
 *   **Communication:** Fetch API for RESTful API calls, WebSockets for real-time data streaming (e.g., QE output logs).
 
@@ -77,13 +77,13 @@ The primary vision is to transform the Quantum ESPRESSO (QE) user experience fro
 *   **Docker Compose:** Used to define and run the multi-service application (e.g., separate containers for frontend, backend, and potentially a Redis/Celery worker).
 *   **Web Server:**
     *   **Backend:** Uvicorn (ASGI server for FastAPI).
-    *   **Frontend:** Nginx (to serve the static React build and act as a reverse proxy, routing API requests to the FastAPI backend).
+    *   **Frontend:** Nginx (to serve the static site and act as a reverse proxy, routing API requests to the FastAPI backend).
 
 ## 4. Phased Implementation Roadmap
 
 ### Phase 1: Core Functionality & Basic UI (MVP)
 *   **Frontend:**
-    *   Basic React application setup.
+    *   Basic applciation application setup.
     *   Dashboard to list simulations (placeholder data initially).
     *   "New Simulation" form with basic text inputs for `prefix`, `outdir`.
     *   Simple text area to display QE output logs.

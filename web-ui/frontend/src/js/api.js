@@ -70,6 +70,12 @@ export class ApiClient {
     });
   }
 
+  async resumeSimulation(id) {
+    return this.fetch(`/simulations/${id}/resume`, {
+      method: 'POST',
+    });
+  }
+
   // Pseudopotentials API
   async getPseudopotentials() {
     return this.fetch('/pseudopotentials/');

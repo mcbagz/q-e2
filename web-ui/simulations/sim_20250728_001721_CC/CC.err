@@ -1,0 +1,6 @@
+
+     Checkpoint signal handlers installed successfully
+       - Send SIGUSR1 (kill -USR1 <pid>) for soft pause with checkpoint
+       - Send SIGUSR2 (kill -USR2 <pid>) for status snapshot
+
+     Sanity checks passed: No issues found

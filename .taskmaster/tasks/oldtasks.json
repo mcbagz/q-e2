@@ -1,0 +1,681 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Create checkpoint_manager module with POSIX signal support",
+        "description": "Add Modules/checkpoint_manager.f90 implementing SIGUSR1/ SIGUSR2 handlers, checkpoint I/O and snapshot utilities.",
+        "details": "• New file Modules/checkpoint_manager.f90\n• USE ISO_C_BINDING and PROCEDURE(C_FUNPTR) to interface with C signal(3)\n• Global flags: soft_pause_requested, snapshot_requested\n• PUBLIC APIs:\n  SUBROUTINE install_signal_handlers()  ! registers C wrappers\n  SUBROUTINE write_checkpoint(fname,iter,etot,conv)\n  SUBROUTINE load_checkpoint(fname)\n  SUBROUTINE write_status_snapshot(iter,etot,forces,stress)\n• Checkpoint format: unformatted Fortran sequential file, version tag + REAL*8/INTEGER arrays\n• Snapshot directory created with SYSTEM(\"mkdir -p …\")\n• Provide helper C stubs signal_wrap.c compiled via mixed-language build rules.\n• Update make.inc to compile and link.\nPseudocode (Fortran):\n  SUBROUTINE handle_soft_pause_signal(sig)\n    soft_pause_requested=.TRUE.\n  END\nTestUtilities: simple program linking module, raises signals via kill -USR1/-USR2, asserts flags set.",
+        "testStrategy": "Unit: f90 driver sets alarm(1); in handler set flag; verify flag flip.\nCheckpoint: write then reload; compare energy/iteration numbers.\nValgrind memory check.\nCI: run on Linux/macOS runners.\nPerformance: ensure write ≤2× wall-clock of normal final write.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Develop POSIX signal C wrapper (signal_wrap.c) and public header",
+            "description": "Create a small C source file wrapping the POSIX signal(3) API so that Fortran code can register its own handlers for SIGUSR1 and SIGUSR2 via ISO_C_BINDING C_FUNPTRs.",
+            "dependencies": [],
+            "details": "• File: src/signal_wrap.c (or Modules/signal_wrap.c depending on layout).  \n• Include <signal.h> and <stdint.h>.  \n• Expose two extern \"C\" functions with BIND(C)-compatible names:  \n    void c_set_usr1_handler(void (*f)(int));  \n    void c_set_usr2_handler(void (*f)(int));  \n  Each stores the passed function pointer in a static and calls signal(SIGUSR1/2, f).  \n• Provide a no-op default stub to avoid null pointers before Fortran installs its handlers.  \n• Add signal_wrap.h exporting the prototypes (not strictly required by Fortran but useful for C unit tests).  \n• Modify build system (make.inc) to compile signal_wrap.c and add it to the object list (e.g., OBJS += signal_wrap.o).  \n• Compilation flags: -std=c99, ensure no name mangling (extern \"C\" if compiled as C++).",
+            "status": "done",
+            "testStrategy": "Write a stand-alone C program that registers a dummy handler through c_set_usr1_handler, send itself SIGUSR1 with raise(), assert handler executed (e.g., increments volatile global). Build in CI with -fsanitize=address/undefined."
+          },
+          {
+            "id": 2,
+            "title": "Create checkpoint_manager.f90 skeleton with global flags and public API stubs",
+            "description": "Add Modules/checkpoint_manager.f90 containing module definition, global request flags, public interfaces and empty bodies for all advertised subroutines so the codebase can compile early.",
+            "dependencies": [
+              1
+            ],
+            "details": "• MODULE checkpoint_manager  \n    USE ISO_C_BINDING  \n    PRIVATE  \n    PUBLIC :: install_signal_handlers, write_checkpoint, load_checkpoint, write_status_snapshot, soft_pause_requested, snapshot_requested  \n    LOGICAL, VOLATILE :: soft_pause_requested = .FALSE., snapshot_requested = .FALSE.  \n    INTERFACE  \n       SUBROUTINE c_set_usr1_handler(f) BIND(C,NAME=\"c_set_usr1_handler\")  \n         IMPORT :: C_FUNPTR  \n         TYPE(C_FUNPTR), VALUE :: f  \n       END SUBROUTINE  \n       SUBROUTINE c_set_usr2_handler(f) BIND(C,NAME=\"c_set_usr2_handler\")  \n         IMPORT :: C_FUNPTR  \n         TYPE(C_FUNPTR), VALUE :: f  \n       END SUBROUTINE  \n    END INTERFACE  \n    CONTAINS  \n      SUBROUTINE install_signal_handlers() ; END  \n      SUBROUTINE write_checkpoint(fname,iter,etot,conv) ; END  \n      SUBROUTINE load_checkpoint(fname) ; END  \n      SUBROUTINE write_status_snapshot(iter,etot,forces,stress) ; END  \n END MODULE checkpoint_manager",
+            "status": "done",
+            "testStrategy": "Re-run full project build; ensure linkage with signal_wrap.o succeeds and module exports expected symbols via nm or objdump."
+          },
+          {
+            "id": 3,
+            "title": "Implement install_signal_handlers logic and Fortran signal callbacks",
+            "description": "Fill in install_signal_handlers() to bridge Fortran handlers with the C wrapper, define the actual handler subroutines that flip the module’s VOLATILE flags, and verify runtime signal delivery.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "• In checkpoint_manager.f90 add:  \n   SUBROUTINE handle_soft_pause_signal(sig) BIND(C) ; USE ISO_C_BINDING ; INTEGER(C_INT), VALUE :: sig ; soft_pause_requested = .TRUE. ; END  \n   SUBROUTINE handle_snapshot_signal(sig) BIND(C) ; USE ISO_C_BINDING ; INTEGER(C_INT), VALUE :: sig ; snapshot_requested = .TRUE. ; END  \n• Within install_signal_handlers():  \n   TYPE(C_FUNPTR) :: fp1, fp2  \n   fp1 = C_FUNLOC(handle_soft_pause_signal)  \n   fp2 = C_FUNLOC(handle_snapshot_signal)  \n   CALL c_set_usr1_handler(fp1)  \n   CALL c_set_usr2_handler(fp2)  \n• Ensure VOLATILE attribute on flags so they are visible across async signal contexts.  \n• Update compiler flags (e.g., -fno-omit-frame-pointer, -pthread if needed).  \n• Document that install_signal_handlers() must be invoked early in program start-up.",
+            "status": "done",
+            "testStrategy": "Create test/utils/test_signal_driver.f90:  \n  CALL install_signal_handlers(); PRINT *, 'PID', getpid(); CALL sleep(1); SYSTEM('kill -USR1 ' // pid); CALL sleep(1); ASSERT(soft_pause_requested);  \nSimilar test for snapshot flag.  Run under CI on Linux/macOS."
+          },
+          {
+            "id": 4,
+            "title": "Implement checkpoint read/write routines with versioned binary format",
+            "description": "Complete write_checkpoint() and load_checkpoint() to persist solver state to an unformatted sequential file, including a version tag for forward compatibility.",
+            "dependencies": [
+              2
+            ],
+            "details": "• Define INTEGER, PARAMETER :: chkpt_version = 1.  \n• write_checkpoint(fname,iter,etot,conv):  \n  OPEN(NEWUNIT=iu,FILE=fname,STATUS='REPLACE',ACCESS='SEQUENTIAL',FORM='UNFORMATTED')  \n  WRITE(iu) chkpt_version  \n  WRITE(iu) iter, etot, conv  \n  ! Extend with REAL*8 arrays (forces, stress, etc.) when available  \n  CLOSE(iu).  \n• load_checkpoint(fname):  \n  OPEN(NEWUNIT=iu,FILE=fname,STATUS='OLD',ACCESS='SEQUENTIAL',FORM='UNFORMATTED')  \n  READ(iu) ver ; IF (ver /= chkpt_version) STOP 'Incompatible checkpoint'  \n  READ(iu) iter, etot, conv  \n  CLOSE(iu)  \n• Add error trapping with IOSTAT and convert to module-local error codes.  \n• Use flush(iu) or CLOSE action='KEEP' to guarantee data written.  \n• Provide helper INTERNAL subroutine safe_open().",
+            "status": "done",
+            "testStrategy": "Unit test writes a checkpoint, immediately reads it back, compares all scalar values with ASSERT_EQ.  Run under valgrind to confirm no leaks or invalid memory.  Fallback path: attempt to read a deliberately corrupted version tag and assert graceful failure."
+          },
+          {
+            "id": 5,
+            "title": "Implement write_status_snapshot() utility, directory handling, and full integration tests",
+            "description": "Add human-readable snapshot writer, ensure directory creation via SYSTEM('mkdir -p …'), and assemble a comprehensive test suite that exercises signals, I/O, and memory safety.",
+            "dependencies": [
+              3,
+              4
+            ],
+            "details": "• write_status_snapshot(iter,etot,forces,stress):  \n  CHARACTER(LEN=*), PARAMETER :: dir='snapshots'  \n  CALL SYSTEM('mkdir -p ' // trim(dir))  \n  WRITE(filename,'(A,I0.6)') dir//'/snap_',iter,'.txt'  \n  OPEN(NEWUNIT=iu,FILE=filename,STATUS='REPLACE',FORM='FORMATTED')  \n  WRITE(iu,*) 'Iteration',iter  \n  WRITE(iu,*) 'Etot',etot  \n  IF (SIZE(forces)>0) WRITE(iu,*) 'Forces',forces  \n  IF (SIZE(stress)>0) WRITE(iu,*) 'Stress',stress  \n  CLOSE(iu)  \n• At program main loop, caller can poll snapshot_requested and invoke this subroutine.  \n• Extend make.inc test target to build test_signal_driver and a new test_checkpoint_io executable.  \n• CI:   \n   – Run tests on Linux & macOS.  \n   – Use timeout to ensure checkpoint write < 2× baseline final write.  \n   – Use valgrind/asan job for memory checking.  \n• Documentation: update README and developer guide with usage instructions and environment notes (POSIX-only).",
+            "status": "done",
+            "testStrategy": "Integration script:  \n  1) Start test_driver that installs handlers and enters compute loop.  \n  2) Send SIGUSR2; wait; verify snapshots/<file> exists and contains correct iteration.  \n  3) Send SIGUSR1; driver detects soft_pause_requested=.TRUE. and exits after checkpoint write.  \n  4) Restart driver with --restart; verify it loads checkpoint and continues iterations.  \n  All checks performed automatically in CI workflow."
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Integrate signal handling & --resume-from in run_pwscf and command_line_options",
+        "description": "Hook checkpoint manager into program start-up and extend CLI parsing.",
+        "details": "Files: PW/src/run_pwscf.f90, Modules/command_line_options.f90\n• Add CHARACTER(LEN=256) :: resume_file\n• Extend get_command_line_option to recognize --resume-from=<file>\n• At program head:\n    CALL install_signal_handlers()\n    IF(LEN_TRIM(resume_file)>0) CALL load_checkpoint(resume_file)\n• Emit banner: \"Resuming from …\" and bypass initialisation that checkpoint already covers (read wavefunctions, charge density). Guard with logical resumed_run.\n• Propagate checkpoint filename through global module or COMMON.\n• Update usage() output.\n• Ensure backward compatibility: if flag absent behaviour unchanged.",
+        "testStrategy": "CLI unit test: pw.x --help contains flag.\nResume test: start calc, send SIGUSR1, restart with --resume-from, energy continuity within 1e-10 Ry.\nRegression: existing inputs without flag compile & run.\nMPI: test with mpirun –n 4.",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Extend CLI parser to recognise --resume-from flag",
+            "description": "Modify Modules/command_line_options.f90 so that get_command_line_option() detects the new --resume-from=<file> argument and stores its value.",
+            "dependencies": [],
+            "details": "• In command_line_options.f90, add CHARACTER(LEN=256) :: resume_file = \"\" and LOGICAL :: resume_flag_present = .FALSE.\n• In the option-scanning loop, match the token that begins with \"--resume-from=\". Use INDEX(arg,\"--resume-from=\") == 1 to detect it, then extract the substring after the ‘=’ into resume_file using arg(LEN(\"--resume-from=\")+1:).\n• Set resume_flag_present = .TRUE. when found; leave other existing options untouched.\n• Keep backwards-compatibility: if flag is absent resume_file remains blank.\n• Ensure parser stops treating subsequent CLI items as namelists only if they do not start with \"--\".\n• Add unit entry point get_resume_file() returning resume_file for external modules.",
+            "status": "done",
+            "testStrategy": "Unit test: run pw.x with --resume-from=ckpt.dat and verify get_resume_file() returns \"ckpt.dat\". Run without the flag and verify the empty string is returned."
+          },
+          {
+            "id": 2,
+            "title": "Create global resume_state module",
+            "description": "Centralise resume related data (resume_file, resumed_run) so that all program units can query it without circular USE dependencies.",
+            "dependencies": [
+              1
+            ],
+            "details": "• New file Modules/resume_state.f90 containing:\n   MODULE resume_state\n     CHARACTER(LEN=256) :: resume_file = \"\"\n     LOGICAL :: resumed_run = .FALSE.\n   END MODULE resume_state\n• In command_line_options.f90, after CLI parsing, USE resume_state and assign resume_state%resume_file = resume_file.\n• Add PUBLIC accessor functions (get_resume_file(), is_resumed_run()) for safer access if preferred.\n• Update the build system to compile the new module before any file that USEs it.",
+            "status": "done",
+            "testStrategy": "Compilation test across the full project; ensure no duplicate symbol or order-of-compilation problems. Unit test: call is_resumed_run() before and after manual assignment."
+          },
+          {
+            "id": 3,
+            "title": "Hook signal handlers and checkpoint loading in run_pwscf",
+            "description": "Modify PW/src/run_pwscf.f90 to register signal handlers and, when a resume file is supplied, load the checkpoint before normal initialisation.",
+            "dependencies": [
+              2
+            ],
+            "details": "• USE checkpoint_manager and resume_state modules at the top of run_pwscf.f90.\n• Immediately after argument parsing completes, CALL install_signal_handlers().\n• IF (LEN_TRIM(resume_state%resume_file) > 0) THEN\n     CALL load_checkpoint(TRIM(resume_state%resume_file))\n     resume_state%resumed_run = .TRUE.\n   END IF\n• Capture potential I/O errors from load_checkpoint and abort gracefully with an informative message.\n• Guard this block so it executes on the master MPI rank only; broadcast resume_state%resumed_run to all ranks via MPI_BCAST.",
+            "status": "done",
+            "testStrategy": "Functional: start a short SCF, send SIGUSR1, restart with --resume-from=<generated file>; verify program prints Resuming banner and proceeds. MPI test with 4 ranks: confirm all ranks see the same resumed_run value."
+          },
+          {
+            "id": 4,
+            "title": "Bypass redundant initialisation and emit resume banner",
+            "description": "Skip expensive I/O (wavefunctions, charge density, etc.) already present in the checkpoint when resumed_run is TRUE, and print a clear banner.",
+            "dependencies": [
+              3
+            ],
+            "details": "• Locate sections in run_pwscf.f90 (and any called subroutines) that read charge density, wavefunctions, k-point grids, etc. Protect them with IF (.NOT. resume_state%resumed_run) THEN … END IF.\n• Just after checkpoint loading, WRITE(*,*) \"==== Resuming from checkpoint: \", TRIM(resume_state%resume_file).\n• Ensure variables that would normally be initialised by the skipped sections are fully restored by load_checkpoint (verify lists: rho, wf, energies, ecutwfc, etc.). Add ASSERT diagnostics if key arrays remain unallocated after load.\n• Verify logic does not alter cold-start path (resumed_run == .FALSE.).",
+            "status": "done",
+            "testStrategy": "Regression: run standard benchmark input without --resume-from and compare SHA-256 of outputs to pre-change baseline. Resume path: start job, terminate via SIGUSR1, restart; confirm first scf iteration energy matches last pre-checkpoint within 1e-10 Ry and total run time skips initial read sections."
+          },
+          {
+            "id": 5,
+            "title": "Update help/usage output and CI regression tests",
+            "description": "Expose the new flag in user documentation, ensure backward compatibility, and extend CI pipeline with resume-flow tests.",
+            "dependencies": [
+              4
+            ],
+            "details": "• In command_line_options.f90 usage() routine, append the line:\n  \"  --resume-from=<file>   Resume calculation from checkpoint written by SIGUSR1\"\n• Update Doc/users_guide.tex and the man page if present.\n• Add CI job steps:\n   1. run pw.x for 3 iterations on a tiny input; send SIGUSR1; capture checkpoint file.\n   2. restart with --resume-from and assert energy continuity (script using grep + awk).\n   3. run pw.x --help and grep for \"--resume-from\".\n• Maintain existing regression matrix to ensure unchanged behaviour when flag is absent.\n• Tag this feature in CHANGELOG.md.",
+            "status": "done",
+            "testStrategy": "CI pipeline should pass all new stages. Manually run pw.x --help and confirm flag appears exactly once. Negative test: supply non-existent checkpoint file; program should exit with non-zero code and explanatory message."
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Add SCF-cycle signal polling in electrons.f90",
+        "description": "Modify PW/src/electrons.f90 loop to honour soft-pause & snapshot requests.",
+        "details": "• At start of DO iter=1,niter read checkpoint_manager logicals.\n• If soft_pause_requested: finish current cycle, CALL write_checkpoint, CALL stop_run(.FALSE.).\n• If snapshot_requested: CALL write_status_snapshot then snapshot_requested=.FALSE.\n• Re-enter loop normally when none set.\n• Ensure thread-safe: protect global flags with !$OMP CRITICAL when OpenMP enabled.\n• Emit user messages to stdout using io_global.\n• Add default checkpoint filename pattern “checkpoint_YYYYMMDD_HHMM.dat”.",
+        "testStrategy": "Functional: run silicon.in; from 2nd shell send SIGUSR2 ⇒ verify snapshot file produced & calc continues; send SIGUSR1 ⇒ verify graceful exit and restart works.\nStress: 10 consecutive signals.\nMPI 32 ranks, OpenMP 4 threads; no deadlock.\nPerformance overhead <0.5 %.",
+        "priority": "high",
+        "dependencies": [
+          1,
+          2
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Insert polling hook in SCF loop",
+            "description": "Refactor PW/src/electrons.f90 so that the first executable line inside DO iter = 1, niter invokes a new internal routine handle_signal_requests(). This call must be placed before any expensive calculations within the iteration to minimise latency, but after variables required by snapshot/checkpoint writers have been updated.",
+            "dependencies": [],
+            "details": "• Locate the main SCF loop (variable iter).\n• Add USE checkpoint_manager, ONLY: handle_signal_requests\n• Immediately after ‘iter = iter + 1’ (or equivalent) insert CALL handle_signal_requests(iter, etot, conv)\n• Ensure variable list passed contains everything needed later (iteration index, current energy, convergence logical, etc.).\n• Guard changes with pre-processor macro (#ifdef __SCF_SIGNAL_POLLING) to allow optional compilation if desired.\n• Re-compile to make sure current build remains clean.",
+            "status": "done",
+            "testStrategy": "Compile full QE suite; run a short Si input to ensure no behavioural change and no compiler warnings."
+          },
+          {
+            "id": 2,
+            "title": "Create thread-safe handle_signal_requests() stub",
+            "description": "Add a CONTAINed subroutine handle_signal_requests() in electrons.f90 that safely reads the global flags soft_pause_requested and snapshot_requested exported by checkpoint_manager using an !$OMP CRITICAL section.",
+            "dependencies": [
+              1
+            ],
+            "details": "• Inside electrons.f90 add CONTAINS block if missing.\n• INTERFACE import: USE checkpoint_manager, ONLY: soft_pause_requested, snapshot_requested, write_status_snapshot, write_checkpoint, stop_run\n• Define: SUBROUTINE handle_signal_requests(iter, etot, conv)\n• Inside, wrap flag read in: !$OMP CRITICAL(check_flags); local_soft = soft_pause_requested; local_snap = snapshot_requested; !$OMP END CRITICAL(check_flags)\n• Emit message only on ionode: IF (ionode) WRITE(io_global,*) \"Signal poll: soft_pause=\",local_soft,\" snapshot=\",local_snap\n• Branch to dedicated helpers (implemented by later subtasks).",
+            "status": "done",
+            "testStrategy": "Run under OMP_NUM_THREADS=4 with a tight loop that flips flags in a parallel section to verify no data races via Intel Thread Checker or valgrind-drd."
+          },
+          {
+            "id": 3,
+            "title": "Implement snapshot request fulfilment",
+            "description": "Extend handle_signal_requests() to perform an immediate status snapshot when local_snap is .TRUE., then safely clear the flag so subsequent iterations proceed normally.",
+            "dependencies": [
+              2
+            ],
+            "details": "• When local_snap .TRUE.:\n   – CALL write_status_snapshot(iter, etot, forces, stress)\n   – Inside a second !$OMP CRITICAL(clear_snap) block set snapshot_requested = .FALSE.\n   – IF (ionode) WRITE(io_global,*) \"Snapshot written at iter\",iter\n• Ensure write_status_snapshot arguments exist in caller scope; pass placeholders (e.g. NULL() C_PTR) if not yet computed.\n• No interruption of the SCF loop; subroutine simply returns.",
+            "status": "done",
+            "testStrategy": "Functional: launch pw.x, send SIGUSR2 after a few iterations, verify snapshot file appears and calculation continues to converge."
+          },
+          {
+            "id": 4,
+            "title": "Implement soft-pause handling and graceful shutdown",
+            "description": "Add logic so that if local_soft is .TRUE. when entering an iteration, the code writes a checkpoint at the END of that iteration and exits via stop_run(.FALSE.).",
+            "dependencies": [
+              2
+            ],
+            "details": "• In main SCF loop declare logical :: pause_after_iter = .FALSE.\n• Immediately after CALL handle_signal_requests set pause_after_iter = soft_pause_requested (read once more in CRITICAL).\n• At very end of the iteration (just before END DO or cycle increment):\n   IF(pause_after_iter) THEN\n      fname = generate_checkpoint_filename()\n      CALL write_checkpoint(fname, iter, etot, conv)\n      IF (ionode) WRITE(io_global,*) \"Soft pause requested – checkpoint written to\",TRIM(fname)\n      !$OMP CRITICAL(clear_soft)\n      soft_pause_requested = .FALSE.\n      !$OMP END CRITICAL(clear_soft)\n      CALL stop_run(.FALSE.)\n   END IF\n• Ensure stop_run import via USE io_global or existing module.",
+            "status": "done",
+            "testStrategy": "Send SIGUSR1 mid-run; program must finish current iteration, emit message, write checkpoint, exit with status 0. Restart using existing --resume-from path to confirm restartability."
+          },
+          {
+            "id": 5,
+            "title": "Add default checkpoint filename generator",
+            "description": "Provide a utility function generate_checkpoint_filename() that returns “checkpoint_YYYYMMDD_HHMM.dat” using system clock, and integrate it with the checkpoint write in subtask 4.",
+            "dependencies": [
+              4
+            ],
+            "details": "• In electrons.f90 CONTAINS section add FUNCTION generate_checkpoint_filename() RESULT(fname)\n   – USE, INTRINSIC :: iso_fortran_env\n   – CHARACTER(LEN=256) :: fname\n   – CALL date_and_time(values=time_vals)\n   – WRITE(fname,'(\"checkpoint_\",I4.4,I2.2,I2.2,\"_\",I2.2,I2.2,\".dat\")') time_vals(1),time_vals(2),time_vals(3),time_vals(5),time_vals(6)\n• Ensure function is PURE and callable from both master and worker ranks; optionally only master computes and broadcasts filename via MPI_BCAST.\n• Replace literal filenames in write_checkpoint calls with this function.\n• Update user documentation message accordingly.",
+            "status": "done",
+            "testStrategy": "Unit: call function, regex-match against pattern.\nIntegration: run two consecutive pauses; verify filenames differ and files exist; total overhead measured with /usr/bin/time <0.5 % against baseline."
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Implement parameter_optimization module",
+        "description": "Create PW/src/parameter_optimization.f90 providing k-point and cutoff optimisers.",
+        "details": "• TYPE param_optimizer with target_accuracy, max_iterations, flags\n• Algorithms:\n  – suggest_kpoint_grid(): uses reciprocal lattice norms as in PRD.\n  – test_cutoff_convergence(): loop cutoffs 30→120 Ry, run single-point calc via existing scf routines in dry-run mode; stop when ΔE<target_accuracy.\n• Provide PUBLIC optimize_parameters() orchestrating both.\n• Factor execution in serial only; later MPI.\n• Add MAKE rule & module to pwscf target.",
+        "testStrategy": "Unit: feed silicon conventional cell; expect grid 6×6×6 for 0.15 Å⁻¹ spacing.\nCutoff: mock energy function returning 1/E²; verify chosen cutoff near analytic optimum.\nRegression: disable optimisation by default; enabled run ≤max_iterations.",
+        "priority": "medium",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create parameter_optimization module skeleton",
+            "description": "Set up PW/src/parameter_optimization.f90 with PUBLIC interface, data types, and stub routines so that the codebase compiles while later subtasks are in progress.",
+            "dependencies": [],
+            "details": "• Add new source file PW/src/parameter_optimization.f90.\n• Declare MODULE parameter_optimization, USE necessary pwscf modules (k_points, io_global, kinds, etc.).\n• Define TYPE :: param_optimizer containing: real(dp) :: target_accuracy, integer :: max_iterations, logical :: optimize_kpoints=.false., optimize_cutoff=.false.\n• Provide a default-initialization CONTAINS subroutine init_param_optimizer(opt, accuracy, max_iter, flags).\n• Declare PUBLIC :: param_optimizer, init_param_optimizer, suggest_kpoint_grid, test_cutoff_convergence, optimize_parameters (latter three as empty stubs).\n• Ensure the module is SERIAL-only: wrap any future MPI calls with pre-processor guards (#ifdef __MPI).",
+            "status": "done",
+            "testStrategy": "Add a dummy unit test in test/parameter_optimization/skeleton.f90 that USEs the module and CALLs init_param_optimizer(); compile and run to confirm successful linking."
+          },
+          {
+            "id": 2,
+            "title": "Implement suggest_kpoint_grid()",
+            "description": "Code the k-point grid suggestion algorithm based on reciprocal lattice norms and target spacing as described in the PRD reference.",
+            "dependencies": [
+              1
+            ],
+            "details": "• In parameter_optimization.f90 implement FUNCTION suggest_kpoint_grid(cell, spacing) RESULT(grid(3)) where spacing = 2π / cutoff_k.\n• Extract lattice vectors from cell%alat, cell%bm.\n• Compute reciprocal lattice vectors b1,b2,b3 and their norms.\n• For each direction i: n_i = MAX(1, NINT(norm(b_i)/spacing)).\n• Ensure n_i are odd when cell has inversion symmetry if optimize_kpoints%flags%require_gamma_centered.\n• Emit VERBOSE output when io_global%ionode.\n• Return integer array grid(3).",
+            "status": "done",
+            "testStrategy": "Unit: Silicon conventional cell (a=5.43 Å) expecting 6×6×6 grid for 0.15 Å⁻¹ spacing; assert equality. Edge cases: 1D chain (large a,b) should yield 1×1×N."
+          },
+          {
+            "id": 3,
+            "title": "Implement test_cutoff_convergence()",
+            "description": "Create routine that loops over kinetic-energy cutoffs (30→120 Ry) running single-point SCF in dry-run mode until total-energy change ΔE falls below target_accuracy.",
+            "dependencies": [
+              1
+            ],
+            "details": "• Implement FUNCTION test_cutoff_convergence(input_state, opt) RESULT(best_cutoff).\n• Loop cutoff = 30,40,…,120 Ry while iter ≤ opt%max_iterations.\n• For each cutoff: CALL scf_driver(input_state, cutoff, dry_run=.TRUE., energy=e(i)).\n• After first step, compute ΔE = ABS(e(i)-e(i-1)); EXIT when ΔE < opt%target_accuracy.\n• Return cutoff that satisfied criterion; if none, return last tested and flag warning.\n• Store energies and cutoffs in local arrays; if io_global%ionode write a mini-table to output file.",
+            "status": "done",
+            "testStrategy": "Mock scf_driver with deterministic function E(cutoff)=E0+1/cutoff^2 to avoid heavy computation; verify best_cutoff ≈ sqrt(1/target_accuracy) within tolerance. Test termination on both satisfied and unsatisfied cases."
+          },
+          {
+            "id": 4,
+            "title": "Implement optimize_parameters() orchestrator",
+            "description": "Combine k-point and cutoff optimisations under a single PUBLIC interface, update global simulation parameters, and respect SERIAL-only execution constraint.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "• Implement SUBROUTINE optimize_parameters(input_state, opt, out_grid, out_cutoff).\n• IF(opt%optimize_kpoints) CALL suggest_kpoint_grid() and overwrite k_points input variables (kpoint_grid, kpoint_shift).\n• IF(opt%optimize_cutoff) CALL test_cutoff_convergence() and overwrite ecutwfc/ecutrho (ecutrho=4*ecutwfc default).\n• Perform validity checks: throw error if existing k_points defined with automatic optimisation.\n• Wrap the whole routine with IF(.NOT.is_mpi_enabled()) to enforce serial-only; otherwise PRINT warning and RETURN without changes.\n• Propagate chosen parameters to subsequent setup routines via USEd common modules or by updating input_state.\n• Provide verbose summary block printed once with chosen grid and cutoff.",
+            "status": "done",
+            "testStrategy": "Integration test: feed silicon.in with AUTO_OPTIMIZE flags, run pw.x -dry-run; parse output for new grid/cutoff values; ensure they match expected results from subtasks 2 & 3."
+          },
+          {
+            "id": 5,
+            "title": "Integrate module into build system and add runtime validation tests",
+            "description": "Add Makefile rules, include dependency in pwscf target, update documentation, and commit unit/integration tests to CI pipeline.",
+            "dependencies": [
+              4
+            ],
+            "details": "• Modify PW/src/Makefile: add parameter_optimization.o to pw_OBJS and to compilation order after setup.o.\n• Touch make.depend if required; run make -j to verify successful build.\n• Update Doc/developer.rst with API description and usage example (&AUTO_OPTIMIZE).\n• Add ctest/parameter_optimization directory: (1) skeleton compile test, (2) silicon dry-run end-to-end test, (3) regression ensuring optimisation disabled when flags unset.\n• Register tests in CTestLists.txt.\n• Update CI YAML to run the new tests on PRs.",
+            "status": "done",
+            "testStrategy": "CI: make all && ctest -R parameter_optimization — all tests pass. Manual: run pw.x < silicon.in with and without AUTO_OPTIMIZE to confirm behaviour; compare total energy difference < 1 meV between manual 6×6×6/50 Ry and auto-tuned run."
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Wire parameter optimiser into input parser and setup",
+        "description": "Extend input.f90 with AUTO_OPTIMIZE namelist and invoke optimiser in setup.f90.",
+        "details": "• Add &AUTO_OPTIMIZE namelist vars matching TYPE fields; default optimise_kpoints=.FALSE.\n• input.f90: call read_auto_optimize() storing values in module.\n• setup.f90: IF(auto_optimize%optimize_kpoints.OR.optimize_cutoff) CALL optimize_parameters()\n• Override k_points and ecutwfc/ecutrho in cell_control derived types.\n• Echo modifications into pwscf output for provenance.",
+        "testStrategy": "Input file with:\n  &AUTO_OPTIMIZE\n     optimize_kpoints=.TRUE.\n  / \nVerify suggested grid differs from user input and is used.\nTurn off flag, ensure original grid kept.\nEnd-to-end convergence comparison script in test-suite.",
+        "priority": "medium",
+        "dependencies": [
+          4
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Define &AUTO_OPTIMIZE namelist variables in input.f90",
+            "description": "Add a new namelist &AUTO_OPTIMIZE to input.f90 containing logical flags and numerical parameters that mirror fields of TYPE param_optimizer (e.g., optimize_kpoints, optimize_cutoff, target_accuracy, max_iterations). Set sensible default values with optimize_kpoints and optimize_cutoff defaulting to .FALSE.",
+            "dependencies": [],
+            "details": "• Locate existing namelist blocks in PW/src/input.f90 and insert the new &AUTO_OPTIMIZE block immediately after &SYSTEM to keep related settings together.\n• Declare local variables for every field; initialise with default values right before the READ statement.\n• Update the master namelist READ statement so the parser can accept &AUTO_OPTIMIZE.\n• Update documentation strings so the keyword parser prints information in -help.\n• Re-run ‘make check-namelists’ (if present) or equivalent script to ensure no collisions with existing keywords.",
+            "status": "done",
+            "testStrategy": "Compile pw.x and run with a minimal input file that contains only &AUTO_OPTIMIZE/ to confirm no parse error and defaults are picked up. Add non-existent keyword to ensure parser throws an error, verifying validation."
+          },
+          {
+            "id": 2,
+            "title": "Create auto_optimize_mod module with read_auto_optimize()",
+            "description": "Factor parsing logic into a dedicated module auto_optimize_mod that owns a public TYPE(auto_optimize_t) instance and a routine read_auto_optimize() which reads &AUTO_OPTIMIZE from the input stream and populates the instance with defaults or user-supplied overrides.",
+            "dependencies": [
+              1
+            ],
+            "details": "• In PW/src, add auto_optimize_mod.f90.\n• Define TYPE auto_optimize_t mirroring the param_optimizer configuration (logical :: optimize_kpoints = .FALSE., logical :: optimize_cutoff = .FALSE., real(dp) :: target_accuracy = 1.0e-4, integer :: max_iterations = 6, etc.).\n• Provide CONTAINS section with SUBROUTINE read_auto_optimize(unit) that:\n  – ACCEPTS the input unit number.\n  – Sets defaults then CALLS read_namelist(unit, nml_auto_optimize, iostat, ierr).\n  – On successful read, copies local variables into the module-level instance.\n• Expose PUBLIC :: auto_opt, read_auto_optimize.\n• Add auto_optimize_mod to the makefile dependencies of input.o.",
+            "status": "done",
+            "testStrategy": "Unit: write a fake input stream in a Fortran test driver, CALL read_auto_optimize(), then ASSERT values against expected defaults and edited values. Use -Ccheck to ensure no uninitialised reads."
+          },
+          {
+            "id": 3,
+            "title": "Hook read_auto_optimize() into main input parsing workflow",
+            "description": "Invoke read_auto_optimize() from input.f90 after existing namelist reads so that optimisation settings are available early during initialisation and globally visible to subsequent stages.",
+            "dependencies": [
+              2
+            ],
+            "details": "• USE auto_optimize_mod in input.f90.\n• After the usual call sequence that reads &CONTROL, &SYSTEM, etc., INSERT:\n  CALL read_auto_optimize(iu_input)\n  IF (iotk_enabled) CALL iotk_write_namelist('AUTO_OPTIMIZE', auto_opt)   ! if IOTK provenance logging exists.\n• Ensure no circular dependency by making auto_optimize_mod depend only on basic modules (constants, kinds).\n• Update error-handling: if iostat/=0 propagate message through existing error infrastructure.",
+            "status": "done",
+            "testStrategy": "End-to-end: run pw.x with sample AUTO_OPTIMIZE block and confirm via a debugger or write-out that auto_opt%optimize_kpoints is .TRUE. when requested."
+          },
+          {
+            "id": 4,
+            "title": "Invoke optimise_parameters() and override k-points / cutoffs in setup.f90",
+            "description": "Modify PW/src/setup.f90 so that, after initial cell and electron structure setup, it evaluates AUTO_OPTIMIZE flags and optionally calls parameter_optimization::optimize_parameters(), then substitutes suggested k-point grid and ecutwfc/rho values in the cell_control derived types before SCF starts.",
+            "dependencies": [
+              3
+            ],
+            "details": "• USE auto_optimize_mod, parameter_optimization.\n• Insert logic:\n  IF (auto_opt%optimize_kpoints .OR. auto_opt%optimize_cutoff) THEN\n     CALL optimize_parameters(auto_opt, cell, ecutwfc, ecutrho, kpnts)\n  END IF\n• The optimise routine should return updated values; copy them into existing global variables (ibrav, kpt_grid, ecutwfc, ecutrho) and into cell_control types so downstream code sees new values.\n• Ensure only root rank calls optimise in MPI runs; broadcast updated parameters via MPI_BCAST.\n• Guard with serial compile flag until Task 4’s MPI work is ready (as per project notes).",
+            "status": "done",
+            "testStrategy": "Functional: run a silicon test case with optimize_kpoints=.TRUE. and verify SCF initial printout shows new k-point grid; run again with flag .FALSE. to confirm original grid. Regression: confirm total energy identical to non-optimised run when flags disabled."
+          },
+          {
+            "id": 5,
+            "title": "Echo optimisation settings and results to pwscf output for provenance",
+            "description": "Ensure both user-requested optimisation options and the final chosen parameters are explicitly written to the pwscf standard output and XML data structures so that results are reproducible.",
+            "dependencies": [
+              4
+            ],
+            "details": "• In setup.f90 right after parameters are finalised, INSERT calls to io_global routines (e.g., CALL io_write_line) printing:\n  “--- AUTO_OPTIMIZE REPORT ---”, all flag values, and the final k-point grid & cutoff values.\n• If XML or JSON provenance writers exist, extend them to add <auto_optimize> subtree with same data.\n• Update iotk modules (or JSON writer) schema if required.\n• Add a ‘version’ integer so future schema changes can be detected.",
+            "status": "done",
+            "testStrategy": "Parse standard output with grep/regex in CI to ensure the banner and parameters appear. If XML enabled, validate produced file against updated schema. Compare runs with optimisation disabled to confirm banner indicates ‘disabled’ state."
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Create pseudopotential recommender module and JSON database",
+        "description": "Add upflib/pp_recommender.f90 and pseudo/pp_database.json for automatic PP suggestions.",
+        "details": "• Implement load_pp_database(): read JSON via FSON library (MIT) or custom lightweight parser.\n• recommend_pp(element,calc_type): lookup; compute quality_score via evaluate_pp_quality() (e.g., diffusion Monte Carlo score placeholder).\n• Provide fallback if element absent.\n• Script tools/update_pp_db.py generates JSON from PSL catalogue.\n• Add cmake/autotools rule linking libfson.",
+        "testStrategy": "Unit: call recommend_pp(“H”,”scf”) returns file from PRD JSON.\nDatabase integrity check on load.\nPerformance: load time <10 ms.\nCI ensures new elements added keep alphabetical order.",
+        "priority": "medium",
+        "dependencies": [],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Define PP-database JSON schema and quality-score specification",
+            "description": "Create a precise JSON schema (field names, types, mandatory vs optional keys) that captures pseudopotential metadata, calculation types supported, and a numeric quality_score entry. Document how evaluate_pp_quality() will interpret or compute this score.",
+            "dependencies": [],
+            "details": "• Draft pp_database.json template covering at least: element, pp_file, calc_types (array), generation_source, valence_config, recommended_cutoff, quality_score.\n• Write schema definition in tools/pp_schema.json using JSON-Schema draft-07 so both Python and CI can validate files.\n• Produce developer docs (docs/pp_database.md) explaining every field and example objects.\n• Decide alphabetical ordering rule (by element symbol) and embed it in documentation for later CI checks.",
+            "status": "pending",
+            "testStrategy": "Validate sample H and Si entries against pp_schema.json with jsonschema Python package."
+          },
+          {
+            "id": 2,
+            "title": "Implement tools/update_pp_db.py to build pp_database.json from PSL catalogue",
+            "description": "Create a Python script that parses the PseudoDojo/PSLibrary catalogue and emits pp_database.json conforming to the schema defined in Subtask 1.",
+            "dependencies": [
+              1
+            ],
+            "details": "• Use requests or urllib to download latest PSL CSV/JSON index.\n• Map PSL fields to our schema, compute placeholder quality_score (e.g., 0.8 default, 1.0 for ‘rrkjus’ types).\n• Ensure resulting JSON is alphabetically ordered by element; use OrderedDict or sort_keys in json.dump.\n• Add CLI flags: --input <file|URL>, --output pseudo/pp_database.json, --dry-run.\n• Integrate a Git pre-commit hook snippet that runs the script and fails if the produced file differs from repo version.",
+            "status": "pending",
+            "testStrategy": "Unit tests with pytest: supply small mock PSL index and compare produced JSON against gold file; verify alphabetical order."
+          },
+          {
+            "id": 3,
+            "title": "Add FSON library and build-system integration",
+            "description": "Bring the MIT-licensed FSON Fortran JSON parser into external/ and update both CMakeLists.txt and configure.ac/Makefile.am to compile and link it as libfson.",
+            "dependencies": [
+              1
+            ],
+            "details": "• Copy or git-submodule FSON source into external/fson/.\n• CMake: add option USE_SYSTEM_FSON (default OFF); otherwise add_subdirectory(external/fson) and target_link_libraries(pwscf PRIVATE fson).\n• Autotools: AC_CONFIG_SUBDIRS or manual compilation; append -lfson to LIBS.\n• Provide a module wrapper Modules/fson_wrapper.f90 exposing load_json_file(json_path, fson_handle).\n• Verify build on GCC, Intel, and macOS Clang CI runners.",
+            "status": "pending",
+            "testStrategy": "CMake + make check build matrix; run small Fortran driver that parses '{\"a\":1}'. Expect a==1."
+          },
+          {
+            "id": 4,
+            "title": "Develop upflib/pp_recommender.f90 with load and recommendation APIs",
+            "description": "Implement the Fortran module that loads pp_database.json at first call and returns the best pseudopotential file for a requested element and calculation type.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "• Module public routines:\n  – SUBROUTINE load_pp_database(json_path)\n  – FUNCTION recommend_pp(element, calc_type) RESULT(pp_file)\n  – FUNCTION evaluate_pp_quality(quality_score, calc_type) RESULT(score)\n• On first recommend_pp call, check if database is loaded; if not, call load_pp_database using fson_wrapper.\n• Selection algorithm: filter objects matching element & calc_type; pick max quality_score; if none, fallback to first entry for element; if element absent, return \"NONE\" and issue WARNING.\n• Cache database in module variables for <10 ms access.\n• Ensure thread safety with Fortran SAVE + OpenMP CRITICAL around first load.",
+            "status": "pending",
+            "testStrategy": "Fortran unit tests via pFUnit: (1) recommend_pp('H','scf') returns existing file; (2) unknown element returns 'NONE'; (3) repeated calls do not reload JSON (check timing)."
+          },
+          {
+            "id": 5,
+            "title": "Create CI tests and performance checks for PP recommender and database integrity",
+            "description": "Extend continuous-integration configuration to run unit tests, schema validation, alphabetical order check, and performance benchmark (<10 ms load).",
+            "dependencies": [
+              4
+            ],
+            "details": "• Add GitHub Actions job ‘pp-recommender’ executing:\n  a) python -m jsonschema -i pseudo/pp_database.json tools/pp_schema.json\n  b) python tools/update_pp_db.py --dry-run and diff vs repo file.\n  c) ctest -R pp_recommender (pFUnit tests).\n  d) Fortran micro-benchmark measuring load_pp_database() wall-clock; fail if >0.01 s.\n• Integrate badge into README.\n• Document contribution guidelines requiring schema validation pass.",
+            "status": "pending",
+            "testStrategy": "CI pass/fail is the core test; locally run `pytest`, `ctest`, and timing script to verify thresholds on developer machines."
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Integrate PP recommendation into read_pseudo and export_upf",
+        "description": "Warn users of sub-optimal PPs and auto-tag newly generated ones.",
+        "details": "• PW/src/read_pseudo.f90: after UPF header read, CALL recommend_pp(); if chosen≠recommended output WARNING & quality score.\n• If --force-pp flag not set, prompt in interactive mode.\n• atomic/src/export_upf.f90: append JSON metadata block (%BLOCK PPEXT) containing cutoff values and commit update_pp_db.py.\n• Add optional --update-pp-db to export_upf to push new PP into database automatically.",
+        "testStrategy": "Select outdated PP; program emits warning.\nExport new UPF; run script; ensure entry appears in JSON.\nRegression: existing export without flag unchanged.",
+        "priority": "low",
+        "dependencies": [
+          6
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Add --force-pp and --update-pp-db command-line flags",
+            "description": "Introduce two new boolean command–line options that will be globally available: (i) --force-pp for PW.x and related executables, (ii) --update-pp-db for atomic/src/export_upf. Ensure both flags are recognised by the generic option parser and are propagated to the calling scopes.",
+            "dependencies": [],
+            "details": "• Modules/command_line_options.f90\n  – Extend the option table with \"force-pp\" and \"update-pp-db\" (both no-arg logical switches).\n  – Add logical :: force_pp=.FALSE., update_pp_db=.FALSE. in a new small module (e.g., pp_cli_flags) with PUBLIC access so that PW/src/read_pseudo.f90 and atomic/src/export_upf.f90 can USE it.\n  – Update get_command_line_option() to set the module variables when the flag is encountered; leave in help banner.\n• PW/src/pwscf_main.f90 & atomic/src/export_upf.f90\n  – USE pp_cli_flags and read force_pp/update_pp_db after command-line parsing.\n  – No functional change yet, just plumbing.\n• Doc: add the two options to doc/INPUT_PW.txt and man pages.",
+            "status": "pending",
+            "testStrategy": "Unit test: run pw.x -h and export_upf -h; both show new flags. Parsing test: pass each flag, query module variable and assert .TRUE."
+          },
+          {
+            "id": 2,
+            "title": "Invoke recommend_pp() in read_pseudo and emit quality warning",
+            "description": "Wire the recommender created in Task 6 into PW/src/read_pseudo.f90 so that every loaded UPF file is evaluated and compared to the database recommendation.",
+            "dependencies": [
+              1
+            ],
+            "details": "• USE upflib/pp_recommender, pp_cli_flags in PW/src/read_pseudo.f90.\n• Immediately after the existing UPF header read, call:\n     CALL recommend_pp(element, calc_type, recommended_name, quality_score)\n• Compare BASENAME(chosen_pp) with recommended_name.\n· IF different THEN\n     WRITE(stdout,*) \"WARNING: sub-optimal pseudopotential detected (quality=\"//TRIM(fmt(quality_score))//\")\"\n· ENDIF\n• Store quality_score in a per-atomic-type field so that it can be printed later in the summary section.\n• No user interaction yet; always continues.",
+            "status": "pending",
+            "testStrategy": "Run a test case with an outdated PP and verify the warning and quality score appear; run with recommended PP and ensure no warning."
+          },
+          {
+            "id": 3,
+            "title": "Implement interactive prompt and enforcement logic",
+            "description": "When the chosen PP is inferior and the run is interactive (stdin is a TTY), prompt the user unless --force-pp is present. Abort in non-interactive mode unless --force-pp is supplied.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "• In read_pseudo.f90, after printing the warning, check:\n     IF(.NOT.force_pp) THEN\n         IF(isatty(0)) THEN\n             WRITE(*,*) \"Use recommended PP '\",TRIM(recommended_name),\"'? (y/n)\"\n             READ(*,*) answer\n             IF(answer=='y' .OR. answer=='Y') THEN\n                 CALL swap_pseudopotential(recommended_name)\n             ENDIF\n         ELSE\n             CALL error_stop(\"Sub-optimal PP rejected; rerun with --force-pp to override.\")\n         ENDIF\n     ENDIF\n• Implement small POSIX wrapper isatty() for portability inside utils/terminal.F90.\n• Ensure behaviour remains unchanged when force_pp=.TRUE.",
+            "status": "pending",
+            "testStrategy": "Interactive shell: choose inferior PP, answer ‘y’ and verify file swap; answer ‘n’ and run continues. Batch (redirected stdin): job aborts unless --force-pp specified."
+          },
+          {
+            "id": 4,
+            "title": "Append %BLOCK PPEXT JSON metadata in export_upf",
+            "description": "Enhance atomic/src/export_upf.f90 so that every newly generated UPF file ends with a JSON metadata block containing cut-off values and quality metrics.",
+            "dependencies": [],
+            "details": "• Gather cutoff_wfc, cutoff_rho, generation_date, program_version and optional quality_score (if available from recommender).\n• Construct a JSON string manually (small size) or via FSON:\n     {\n       \"ecutwfc\": 70.0,\n       \"ecutrho\": 560.0,\n       \"generated_on\": \"2024-05-17T14:32:11Z\",\n       \"quality_score\": 0.93\n     }\n• After writing standard UPF content, append:\n     %BLOCK PPEXT\n     <JSON string>\n     %ENDBLOCK PPEXT\n• Ensure original export path when flag not used remains byte-for-byte identical (regression requirement): guard new code with logical metadata_enabled=.TRUE. (default) so tests can disable if needed.",
+            "status": "pending",
+            "testStrategy": "Generate a UPF; confirm %BLOCK PPEXT exists and JSON parses via python -m json.tool. Run legacy path with metadata_enabled=.FALSE.; file matches reference checksum."
+          },
+          {
+            "id": 5,
+            "title": "Automate PP database update from export_upf",
+            "description": "Add functionality behind the --update-pp-db flag allowing export_upf to push the newly generated PP and its metadata to pseudo/pp_database.json by calling tools/update_pp_db.py.",
+            "dependencies": [
+              1,
+              4
+            ],
+            "details": "• In export_upf.f90 after successful file write, IF(update_pp_db) THEN\n     status = EXECUTE_COMMAND_LINE(\"python3 \"//TRIM(script_path)//\" \"//TRIM(output_file))\n     IF(status /= 0) CALL error_stop(\"update_pp_db.py failed (status=\"//status//\")\")\n  ENDIF\n• Detect script_path via GET_ENVIRONMENT_VARIABLE(\"QE_TOP\")//\"/tools/update_pp_db.py\" or fallback to relative path.\n• Pass --append mode inside the command so the script only adds entry if not present.\n• Update tools/update_pp_db.py to parse %BLOCK PPEXT, merge json, and sort by atomic symbol.\n• Emit confirmation message \"PP database updated\".\n• Ensure flag is hidden from help on builds where python is absent (compile-time preprocessor guard HAVE_PYTHON).",
+            "status": "pending",
+            "testStrategy": "Run export_upf --update-pp-db; verify pp_database.json gains new entry and remains valid JSON; rerun – entry not duplicated. CI: mock python script returning non-zero exit to assert error path."
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Develop sanity_config and sanity_checks modules",
+        "description": "Implement configurable sanity check framework with INI file support.",
+        "details": "• Modules/sanity_config.f90 as per PRD; INI parsing via small intrinsic routine using READ(unit,*) or integrate INIH C library with ISO_C_BINDING.\n• Modules/sanity_checks.f90: implement checks: atomic distances <0.5 Å?; cell angles unreasonable; isolated atom detection; symmetry breaking.\n• Provide run_all_checks(allow_continue) logic with prompt handling.\n• Default config at ~/.qe/config.ini created on first run.",
+        "testStrategy": "Unit tests per check with crafted inputs.\nConfig test: change level=critical, expect exit.\nForce flag bypass.\nINI round-trip save/load equality.\nCI memory & thread sanitizers.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Define configuration schema and default INI template",
+            "description": "Create a formal list of configurable keys, their default values, data types, and acceptable ranges/severities for each sanity check. Provide a default INI string that will be written to ~/.qe/config.ini on first run.",
+            "dependencies": [],
+            "details": "1. List every sanity check (distances, cell angles, isolated atoms, symmetry breaking) and associate keys such as distance.min, angle.max, isolation.radius, symmetry.tolerance, level.\n2. Decide on global keys (log_level, prompt_on_warning, force_flag_name). Include allow_continue default.\n3. Store the template as a CHARACTER(len=:), allocatable constant inside a small Fortran include file (e.g., sanity_config_defaults.inc) for easy write-out.\n4. Document each key inline to enable later auto-generation of comments in the INI file.",
+            "status": "done",
+            "testStrategy": "Unit: parse the default template with the future parser (stub) and verify all expected keys are present and values match specification."
+          },
+          {
+            "id": 2,
+            "title": "Implement compact INI parser/serializer with optional INIH C backend",
+            "description": "Provide a Fortran-visible API capable of reading an INI file into a mapping structure and writing it back. Prefer a pure Fortran fallback using READ(unit,*) and simple section/key scanning, and enable optional linking against INIH via ISO_C_BINDING for performance.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Define TYPE ini_kv_pair (CHARACTER(:), CHARACTER(:)) and TYPE ini_section containing an allocatable array of pairs.\n2. Implement read_ini_pure(unit, sections) that line-scans, trims, ignores comments (# and ;) and fills data structures.\n3. Add BUILD flag USE_INIH; if defined, provide INTERFACE to inih C functions ini_parse_string / ini_parse_file; wrap them into read_ini_inih.\n4. Provide generic read_ini() that dispatches depending on build flag.\n5. Implement write_ini(unit, sections) with aligned “key = value” formatting, preserving order.\n6. Expose PUBLIC: load_ini(path, sections), save_ini(path, sections), get_value(section,key,default), set_value(section,key,val).",
+            "status": "done",
+            "testStrategy": "Round-trip test: load default template, modify one key, save, reload, assert equality. Build matrix for both pure and INIH back-ends under CI."
+          },
+          {
+            "id": 3,
+            "title": "Develop sanity_config.f90 module",
+            "description": "Create the high-level configuration manager that loads ~/.qe/config.ini (or creates it) and exposes typed getters/setters to the rest of the codebase.",
+            "dependencies": [
+              2
+            ],
+            "details": "1. NEW MODULE sanity_config; USE ini_parser_mod created in subtask 2.\n2. On first call to load_sanity_config(), check existence of ~/.qe; mkdir if necessary; if file missing, write template from subtask 1.\n3. After loading, perform type conversion: INTEGER, REAL(8), LOGICAL, or CHARACTER.\n4. Provide PUBLIC: load_sanity_config(), save_sanity_config(), get_real(key), get_int(key), get_logical(key), get_string(key), set_* variants.\n5. Implement cache to prevent repeated disk I/O; include flag config_loaded.\n6. Offer helper get_check_threshold(check_name) returning threshold + severity level.",
+            "status": "done",
+            "testStrategy": "Unit: fake HOME to temp dir, call load_sanity_config() twice, assert file creation on first call and no rewrite on second. Getter returns correct typed values with fallbacks."
+          },
+          {
+            "id": 4,
+            "title": "Implement individual sanity check routines in sanity_checks.f90",
+            "description": "Write self-contained functions to evaluate each physical sanity criterion, using thresholds from sanity_config module.",
+            "dependencies": [
+              3
+            ],
+            "details": "1. MODULE sanity_checks; USE sanity_config.\n2. For each check:\n   a) check_atomic_distances(structure) -> returns severity & message; compute pairwise distances, compare with distance.min.\n   b) check_cell_angles(cell) -> evaluate angles vs angle.max/min.\n   c) check_isolated_atoms(structure) -> graph analysis within isolation.radius.\n   d) check_symmetry_break(structure) -> compare nominal lattice symmetry with atomic positions tolerance.\n3. Define TYPE san_result (severity, message, suggestion).\n4. Provide PUBLIC perform_all_checks(structure, cell, results(:)).",
+            "status": "done",
+            "testStrategy": "Craft small mock structures: (i) two atoms at 0.3 Å, expect critical; (ii) 60° cell, expect warning; (iii) isolated single atom, etc. Assert severity matches expected config."
+          },
+          {
+            "id": 5,
+            "title": "Create run_all_checks orchestrator with interactive prompt and force bypass",
+            "description": "Provide a high-level routine that invokes all checks, aggregates results, handles user prompting, and sets allow_continue flag for the caller.",
+            "dependencies": [
+              4
+            ],
+            "details": "1. Add SUBROUTINE run_all_checks(structure, cell, allow_continue) to sanity_checks module.\n2. Call perform_all_checks; sort results by severity (critical > warning > info).\n3. If critical and NOT force flag (from config or future CLI), print summary and set allow_continue=.false.\n4. For warning, prompt user via READ(*,*) unless prompt_on_warning=.false.; respect batch/non-interactive mode by checking INPUT_UNIT==F.\n5. Respect global config log_level when printing.\n6. Return logical so caller can decide to exit or proceed.",
+            "status": "done",
+            "testStrategy": "Driver program passes mock structure, simulates stdin with EXPECTED answers, verifies allow_continue toggles. Test force flag true forces continuation even with critical issues."
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Hook sanity checks into setup and command-line options",
+        "description": "Parse --ignore-sanity-checks, --sanity-checks-only, --force, --config flags and control run flow.",
+        "details": "• Modules/command_line_options.f90: extend parser for new flags, update help.\n• PW/src/setup.f90: CALL load_sanity_config(); parse flags; CALL run_all_checks(can_continue); obey can_continue and checks_only mode.\n• When --config key=value supplied, CALL set_config_value then save.\n• Ensure MPI root only prompts, broadcast decision via MPI_BCAST.",
+        "testStrategy": "End-to-end: run pw.x --sanity-checks-only <input>; program exits after checks.\nRun with --ignore-sanity-checks; warnings suppressed.\nMulti-rank prompt appears once.\nBack-compat tests pass.",
+        "priority": "high",
+        "dependencies": [
+          8
+        ],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Extend command-line parser with new sanity-related flags",
+            "description": "Add --ignore-sanity-checks, --sanity-checks-only, --force, and --config=<key=value> options to Modules/command_line_options.f90, including help/usage text.",
+            "dependencies": [],
+            "details": "• In command_line_options.f90, enlarge the TYPE cli_options to include four new logical members (ignore_checks, checks_only, force_checks) and a CHARACTER(LEN=256) :: cfg_kv.\n• Update get_command_line_options() so that it recognises the new tokens. For --config, capture the full key=value string (allow multiple occurrences by storing in allocatable array).\n• Amend write_help() output to document the behaviour of each flag, preserving existing formatting.\n• Maintain backward compatibility: unrecognised options must still trigger error as before.\n• Re-run make and confirm no other modules break due to new fields (provide accessor functions if needed).",
+            "status": "done",
+            "testStrategy": "Unit: call get_command_line_options() from a small driver with synthetic argv arrays and assert flag values. Ensure --help prints new lines."
+          },
+          {
+            "id": 2,
+            "title": "Expose parsed flags to PW/src/setup.f90",
+            "description": "Make the newly parsed options available to setup.f90 and other modules through a clean interface.",
+            "dependencies": [
+              1
+            ],
+            "details": "• Add a PUBLIC getter in command_line_options.f90, e.g., get_sanity_cli_flags(ignore, only, force, cfg_pairs).\n• In PW/src/setup.f90 (and any callers), invoke the getter after parsing.\n• Store returned values in local variables or a small derived TYPE sanity_cli_state for clarity.\n• Ensure existing code paths that fetch other CLI options remain unchanged.\n• Update use associations and rebuild.",
+            "status": "done",
+            "testStrategy": "Integration: run pw.x --ignore-sanity-checks dummy.in and print out the received logicals in setup.f90 (guarded by #ifdef DEBUG) to verify correct propagation."
+          },
+          {
+            "id": 3,
+            "title": "Implement --config key=value processing and persistence",
+            "description": "Apply configuration overrides supplied on the CLI and persist them through sanity_config module.",
+            "dependencies": [
+              1
+            ],
+            "details": "• In setup.f90 after CLI retrieval, iterate over cfg_pairs array.\n• For each entry split on first '=' to obtain key & value strings.\n• CALL set_config_value(TRIM(key), TRIM(value)) from sanity_config module (delivered by Task 8).\n• After all overrides, CALL save_sanity_config() so the updated INI is written (ensure file locking for MPI root only; other ranks skip save).\n• Handle malformed entries (no '=' or empty key) with fatal error before any heavy initialisation.",
+            "status": "done",
+            "testStrategy": "Functional: run pw.x --config max_distance=2.0 --config level=critical silicon.in, then inspect ~/.qe/config.ini for new values. Negative test: --config badformat aborts with clear message."
+          },
+          {
+            "id": 4,
+            "title": "Wire sanity-check execution flow into setup based on CLI flags",
+            "description": "Call load_sanity_config, execute run_all_checks(), and control continuation/early exit according to --ignore-sanity-checks, --sanity-checks-only, and --force.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "• At the start of setup.f90, CALL load_sanity_config().\n• If ignore_checks .TRUE. THEN set logical can_continue=.TRUE. and skip run_all_checks().\n• ELSE CALL run_all_checks(can_continue) from sanity_checks module.\n• When can_continue=.FALSE. AND .NOT. force_checks THEN gracefully STOP with informative banner.\n• If checks_only .TRUE. THEN after successful checks (regardless of force/ignore) STOP without entering the normal computation loop.\n• Make sure force_checks overrides can_continue but not checks_only.\n• Return proper exit status codes (0 success, 2 aborted by failed sanity).",
+            "status": "done",
+            "testStrategy": "End-to-end:\n1. pw.x --sanity-checks-only input → program terminates after checks.\n2. pw.x --ignore-sanity-checks → no check output.\n3. Introduce failing geometry, run without --force → program exits with status 2; run with --force continues."
+          },
+          {
+            "id": 5,
+            "title": "Ensure single MPI prompt and broadcasted user decision",
+            "description": "Modify run_all_checks and supporting routines so that only MPI root rank prompts the user and the answer is broadcast via MPI_BCAST to all ranks.",
+            "dependencies": [
+              4
+            ],
+            "details": "• Guard interactive prompts with IF (my_rank==root) THEN ... to collect response (Y/N).\n• Convert character response to integer flag (0=no continue,1=continue) and CALL MPI_BCAST(flag,1,MPI_INTEGER,root,MPI_COMM_WORLD,ierr).\n• All ranks set can_continue = (flag==1).\n• For non-interactive runs (batch, checks_only, or force_checks) skip prompting completely to avoid deadlocks.\n• Update any existing prompt utilities to accept communicator argument or rely on global communicator.\n• Verify behaviour under both OpenMPI and Intel MPI.",
+            "status": "done",
+            "testStrategy": "Parallel functional test with mpirun -n 8 pw.x (1) failing check without --force: confirm only one prompt; after answering, other ranks follow decision. (2) Batch mode with --sanity-checks-only: verify no hang in non-interactive CI runners."
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Implement minimal GUI backend with pause/resume & sanity integration",
+        "description": "Create GUI/src/qe_gui_server.py providing REST/WebSocket endpoints for job control and sanity pre-checks.",
+        "details": "• Dependencies: Flask 3.x, Flask-SocketIO, python-ping for liveness.\n• Endpoints:\n   POST /check -> run_sanity_checks()\n   POST /run   -> start_calculation()\n   POST /pause -> pause_calculation()\n   POST /snapshot -> request_snapshot()\n• Uses subprocess.Popen; store PID; send signals SIGUSR1/USR2 via os.kill.\n• Parse sanity output regex \"\\[(info|warning|critical)]\".\n• Provide JSON schema for frontend.\n• Add poetry/requirements.txt file.\n• Provide systemd user unit for server autostart.",
+        "testStrategy": "Unit: pytest with monkeypatch to fake pw.x returning known stdout.\nIntegration: start dummy sleep process, send pause/snapshot, verify signal receipt.\nWebSocket test: client receives status updates.\nCross-platform: Windows skipped with mark because signals POSIX-only.",
+        "priority": "medium",
+        "dependencies": [
+          3,
+          9
+        ],
+        "status": "pending",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Project scaffolding & dependency setup",
+            "description": "Create basic project structure, dependency management files and a minimal Flask-SocketIO server stub.",
+            "dependencies": [],
+            "details": "1. Initialise Poetry project in GUI/ (or update existing pyproject.toml) and declare dependencies: flask>=3,<4, flask-socketio>=5,<6, eventlet, pythonping>=1,<2.\n2. Generate a fallback requirements.txt via `poetry export --without-hashes -f requirements.txt` for non-Poetry users.\n3. Create GUI/src/qe_gui_server.py containing:\n   • `from flask import Flask, jsonify` and `from flask_socketio import SocketIO`\n   • `app = Flask(__name__)` with JSON config defaults (HOST, PORT, DEBUG).\n   • `socketio = SocketIO(app, cors_allowed_origins='*')`.\n   • Plain `/health` GET endpoint returning {\"status\": \"ok\"} to verify server is alive.\n   • `if __name__ == '__main__': socketio.run(app)` guard so tests can import the module.\n4. Add a Makefile target `run-gui` (or Poetry script) for easy local start: `poetry run python -m qe_gui_server`.\n5. Commit .editorconfig, .gitignore entries for __pycache__, *.log, .env.",
+            "status": "pending",
+            "testStrategy": "Run `poetry install` then `poetry run pytest -q` on an empty test suite to ensure dependencies resolve. Curl GET /health should return 200 JSON."
+          },
+          {
+            "id": 2,
+            "title": "Implement job control REST endpoints & process manager",
+            "description": "Add /run, /pause and /snapshot POST routes and internal logic to start an external QE calculation, persist its PID and deliver POSIX signals for pause/resume & snapshot handling.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Create ProcessManager class in qe_gui_server.py with methods:\n   • `start(cmd:list)` → stores subprocess.Popen handle, writes PID to `$XDG_RUNTIME_DIR/qe_job.pid`.\n   • `pause()` → `os.kill(pid, signal.SIGUSR1)`.\n   • `snapshot()` → `os.kill(pid, signal.SIGUSR2)`.\n   • `status()` → dict with running flag, returncode, start_time.\n2. Wire Flask routes:\n   • POST /run {\"cmd\": \"pw.x -in input.in\"} calls ProcessManager.start(). Reject if a job is already running.\n   • POST /pause calls pause(); success 202.\n   • POST /snapshot calls snapshot(); success 202.\n   • GET /status returns ProcessManager.status() JSON.\n3. Capture stdout/stderr with `subprocess.Popen(..., text=True, stdout=PIPE, stderr=STDOUT)`; start a background Thread that reads lines and appends to a ring buffer for later WebSocket emission.\n4. Ensure graceful cleanup: register atexit handler to terminate orphan processes.\n5. Guard POSIX-only code under `if os.name != 'posix': abort(501, \"Signals not supported on this platform\")`.",
+            "status": "pending",
+            "testStrategy": "Pytest using monkeypatch to replace subprocess.Popen with a dummy process object that records received signals; verify: POST /run returns 201, POST /pause delivers SIGUSR1, POST /snapshot delivers SIGUSR2, and status reflects state transitions."
+          },
+          {
+            "id": 3,
+            "title": "Sanity check execution & result parsing",
+            "description": "Provide /check POST route that runs QE sanity pre-checks, parses their output by severity and returns structured JSON conforming to an explicit schema.",
+            "dependencies": [
+              1
+            ],
+            "details": "1. Define JSON Schema sanity_result.schema.json under GUI/schemas/:\n   {\n     \"type\": \"object\",\n     \"properties\": {\n       \"summary\": {\"type\": \"object\", \"properties\": {\"info\": {\"type\": \"integer\"}, \"warning\": {\"type\": \"integer\"}, \"critical\": {\"type\": \"integer\"}}},\n       \"messages\": {\"type\": \"array\", \"items\": {\"type\": \"object\", \"properties\": {\"level\": {\"enum\": [\"info\", \"warning\", \"critical\"]}, \"text\": {\"type\": \"string\"}}}}\n     }, \"required\": [\"summary\", \"messages\"]\n   }\n2. Implement `run_sanity_checks()` that executes `pw.x -check` (or provided command) with subprocess.check_output, decodes UTF-8, splits lines.\n3. Use regex `r\"\\[(info|warning|critical)]\\s*(.*)\"` to classify lines; accumulate counts.\n4. Return dict conforming to schema; validate with `jsonschema` package (add to dependencies).\n5. Create Flask POST /check that calls the function and returns 200 with JSON or 500 on subprocess error.\n6. Provide CLI fallback `python -m qe_gui_server --check` for manual testing.",
+            "status": "pending",
+            "testStrategy": "Unit test feeds sample stdout lines via monkeypatch to run_sanity_checks() and asserts JSON matches schema. Integration test: POST /check returns correct counts given mocked subprocess output."
+          },
+          {
+            "id": 4,
+            "title": "WebSocket broadcasting & liveness monitoring",
+            "description": "Stream live job output and heartbeat information to connected clients using Flask-SocketIO, backed by pythonping for host reachability.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "1. Extend ProcessManager thread created in subtask 2 to emit each captured stdout line via `socketio.emit('job_output', {'line': line})`.\n2. Add namespace `/events`; on `connect` send current status immediately.\n3. Create PingMonitor Thread that every 5 s runs `pythonping(ping_target, count=1)`; emit `socketio.emit('host_ping', {'alive': True, 'latency_ms': ...})`.\n4. Tie status events: when ProcessManager detects process end, emit `socketio.emit('job_finished', status_dict)`.\n5. Update REST endpoints to also broadcast `job_started`, `job_paused`, `snapshot_taken` events so UI stays in sync.\n6. Document message contract in README (event names, payload JSON).",
+            "status": "pending",
+            "testStrategy": "Use python-socketio test client: start server in background, connect, trigger /run with dummy process, assert reception of 'job_started' and continuous 'job_output' lines, kill job and assert 'job_finished'."
+          },
+          {
+            "id": 5,
+            "title": "Deployment packaging & systemd user service",
+            "description": "Finalize production deployment artefacts: systemd unit, launch script and end-to-end tests.",
+            "dependencies": [
+              4
+            ],
+            "details": "1. Create GUI/systemd/qe-gui-server.service:\n   [Unit]\n   Description=Quantum Espresso GUI backend\n   After=network.target\n   [Service]\n   ExecStart=/usr/bin/env poetry run python -m qe_gui_server\n   Restart=on-failure\n   WorkingDirectory=%h/projects/qe-gui\n   Environment=PYTHONUNBUFFERED=1\n   [Install]\n   WantedBy=default.target\n2. Provide install script `install_service.sh` that copies the file to `~/.config/systemd/user/` and runs `systemctl --user enable --now qe-gui-server.service`.\n3. Add README section with instructions for both Poetry and requirements.txt users, list open port, firewall notes.\n4. Build automation: GitHub Action (or Make target) that runs `pytest`, lints with flake8 and, on success, packages a tarball containing source + schema + unit file.\n5. End-to-end test script `tests/e2e_backend.py`: launches server via `subprocess.Popen`, waits on /health, executes the complete REST workflow (check → run → pause → snapshot) against a mock calc, then terminates server.\n6. Ensure CI passes on Ubuntu-latest; mark SIGUSR* tests with `pytest.mark.skipif(os.name!='posix', ...)`.",
+            "status": "pending",
+            "testStrategy": "Manual: run `install_service.sh`, execute `systemctl --user status qe-gui-server` and curl /health. CI: e2e test must exit 0."
+          }
+        ]
+      }
+    ],
+    "metadata": {
+      "created": "2025-07-23T04:10:37.047Z",
+      "updated": "2025-07-25T15:28:11.643Z",
+      "description": "Tasks for master context"
+    }
+  }
+}

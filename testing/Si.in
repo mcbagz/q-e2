@@ -15,6 +15,11 @@
     mixing_beta = 0.7
     conv_thr = 1.0d-8
   /
+  &AUTO_OPTIMIZE
+  optimize_kpoints = .true.
+  optimize_cutoff = .true.
+  kpoint_spacing = 0.15
+  /
   ATOMIC_SPECIES
    Si 28.086 Si.bhs
   ATOMIC_POSITIONS (alat)

@@ -6,7 +6,12 @@
       "Bash(chmod:*)",
       "Bash(find:*)",
       "Bash(mv:*)",
-      "Bash(task-master set-status:*)"
+      "Bash(task-master set-status:*)",
+      "Bash(cp:*)",
+      "Bash(docker exec:*)",
+      "Bash(docker-compose:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": []
   }
