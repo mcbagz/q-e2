@@ -1,89 +1,74 @@
-![q-e-logo](logo.jpg)
+# Quantum ESPRESSO with Web UI
 
-This is the distribution of the Quantum ESPRESSO suite of codes (ESPRESSO:
-opEn-Source Package for Research in Electronic Structure, Simulation, and
-Optimization)
+This project combines Quantum ESPRESSO with a web-based user interface, all runnable within a single Docker container.
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
+## Changes Made
 
-## USAGE
-Quick installation instructions for CPU-based machines. For GPU execution, see
-file [README_GPU.md](README_GPU.md). Go to the directory where this file is. 
+This repository now includes a unified Docker setup that integrates:
 
-Using "make"
-(`[]` means "optional"):
+-   **Quantum ESPRESSO:** The core simulation engine.
+-   **Web UI Backend:** A Python-based backend for managing simulations and interacting with Quantum ESPRESSO.
+-   **Web UI Frontend:** A modern web interface for users to interact with the system.
+
+Previously, Quantum ESPRESSO and the web UI components were intended to run in separate containers. This setup consolidates them into a single, self-contained Docker image, simplifying deployment and management.
+
+## How to Launch the Docker Container
+
+To build and run the combined Docker container, follow these steps:
+
+1.  **Ensure Docker is installed:** If you don't have Docker installed, follow the instructions on the [official Docker website](https://docs.docker.com/get-docker/).
+
+2.  **Navigate to the project root:** Open your terminal or command prompt and change your directory to the root of this project (where this `README.md` file is located):
+
+    ```bash
+    cd /path/to/your/q-e2
+    ```
+
+3.  **Build the Docker image:** This command will build the Docker image. It might take some time as it compiles Quantum ESPRESSO and builds the web UI components.
+
+    ```bash
+    docker build -t qe-web-ui .
+    ```
+
+    -   `-t qe-web-ui`: Tags the image with the name `qe-web-ui`. You can choose a different name if you prefer.
+    -   `.`: Specifies that the Dockerfile is in the current directory.
+
+4.  **Run the Docker container:** Once the image is built, you can run the container using the following command:
+
+    ```bash
+    docker run -d -p 80:80 -p 8000:8000 --name qe-web-app qe-web-ui
+    ```
+
+    -   `-d`: Runs the container in detached mode (in the background).
+    -   `-p 80:80`: Maps port 80 of your host machine to port 80 inside the container (for the web UI frontend).
+    -   `-p 8000:8000`: Maps port 8000 of your host machine to port 8000 inside the container (for the web UI backend API).
+    -   `--name qe-web-app`: Assigns a name to your container (`qe-web-app`). You can choose a different name.
+    -   `qe-web-ui`: Specifies the name of the Docker image to run.
+
+5.  **Access the Web UI:** After the container is running, you can access the web interface by opening your web browser and navigating to:
+
+    ```
+    http://localhost/
+    ```
+
+    The backend API will be accessible at `http://localhost:8000/`.
+
+## Stopping and Removing the Container
+
+To stop the running container:
+
+```bash
+docker stop qe-web-app
 ```
-./configure [options]
-make all
+
+To remove the container (after stopping it):
+
+```bash
+docker rm qe-web-app
 ```
-"make" alone prints a list of acceptable targets. Optionally,
-`make -jN` runs parallel compilation on `N` processors.
-Link to binaries are found in bin/.
 
-Using "CMake" (v.3.14 or later):
+To remove the Docker image (if you no longer need it):
 
+```bash
+docker rmi qe-web-ui
 ```
-mkdir ./build
-cd ./build
-cmake -DCMAKE_Fortran_COMPILER=mpif90 -DCMAKE_C_COMPILER=mpicc [-DCMAKE_INSTALL_PREFIX=/path/to/install] ..
-make [-jN]
-[make install]
-```
-Although CMake has the capability to guess compilers, it is strongly recommended to specify
-the intended compilers or MPI compiler wrappers as `CMAKE_Fortran_COMPILER` and `CMAKE_C_COMPILER`.
-"make" builds all targets. Link to binaries are found in build/bin.
-If `make install` is invoked, directory `CMAKE_INSTALL_PREFIX`
-is prepended onto all install directories.
-
-For more information, see the general documentation in directory Doc/, 
-package-specific documentation in \*/Doc/, and the web site 
-http://www.quantum-espresso.org/. Technical documentation for users and
-developers 
-can be found on [Wiki page on gitlab](https://gitlab.com/QEF/q-e/-/wikis/home).
-
-## PACKAGES
-
-- PWscf: structural optimisation and molecular dynamics on the electronic ground state, with self-consistent solution of DFT equations;
-- CP: Car-Parrinello molecular dynamics;
-- PHonon: vibrational and dielectric properties from DFPT (Density-Functional Perturbation Theory);
-- TD-DFPT: spectra from Time-dependent DFPT;
-- HP: calculation of Hubbard parameters from DFPT;
-- EPW: calculation of electron-phonon coefficients, carrier transport, phonon-limited superconductivity and phonon-assisted optical processes;
-- PWCOND: ballistic transport;
-- XSpectra: calculation of X-ray absorption spectra;
-- PWneb: reaction pathways and transition states with the Nudged Elastic Band method;
-- GWL: many-body perturbation theory in the GW approach using ultra-localised Wannier functions and Lanczos chains;
-- QEHeat: energy current in insulators for thermal transport calculations in DFT.
-- KCW: Koopmans-compliant functionals in a Wannier representation
-
-## Modular libraries
-The following libraries have been isolated and partially encapsulated in view of their release for usage in other codes as well:
-
-- UtilXlib: performing basic MPI handling, error handling, timing handling.
-- FFTXlib: parallel (MPI and OpenMP) distributed three-dimensional FFTs, performing also load-balanced distribution of data (plane waves, G-vectors and real-space grids) across processors.
-- LAXlib: parallel distributed dense-matrix diagonalization, using ELPA, SCALapack, or a custom algorithm.
-- KS Solvers: parallel iterative diagonalization for the Kohn-Sham Hamiltonian (represented as an operator),using block Davidson and band-by-band or block Conjugate-Gradient algorithms.
-- LRlib: performs a variety of tasks connected with (time-dependent) DFPT, to be used also in connection with Many-Body Perturbation Theory.
-- upflib: pseudopotential-related code.
-- devXlib: low-level utilities for GPU execution
-
-## Contributing
-Quantum ESPRESSO is an open project: contributions are welcome.
-Read the [Contribution Guidelines](CONTRIBUTING.md) to see how you
-can contribute.
-
-## LICENSE
-
-All the material included in this distribution is free software;
-you can redistribute it and/or modify it under the terms of the GNU
-General Public License as published by the Free Software Foundation;
-either version 2 of the License, or (at your option) any later version.
-
-These programs are distributed in the hope that they will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
-for more details.
-
-You should have received a copy of the GNU General Public License along
-with this program; if not, write to the Free Software Foundation, Inc.,
-675 Mass Ave, Cambridge, MA 02139, USA.

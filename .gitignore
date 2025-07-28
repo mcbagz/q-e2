@@ -74,3 +74,55 @@ node_modules/
 # Task files
 # tasks.json
 # tasks/ 
+
+# Development/Documentation/Notes
+ArchitectureOverview.md
+BestPractices.md
+checkpoint_fixes_summary.md
+CLAUDE.md
+DOCKER_BUILD_FIX.md
+features.txt
+GamePlan.md
+PARAMETER_OPTIMIZATION_USAGE.md
+README_GPU.md
+secondbrain.txt
+tips.txt
+web-ui/BACKEND_FIXES.md
+web-ui/FRONTEND_FIXES.md
+
+# Configuration/Example Files
+.env.example
+pp_vis_0.in
+pp_vis_1.in
+pp_vis_8.in
+si.xml
+test_auto_optimize_auto.in
+test_auto_optimize_auto.out
+test_auto_optimize_fixed.in
+test_auto_optimize_fixed.out
+test_auto_optimize.in
+test_auto_optimize.out
+test_kpoint_override.in
+test_namelist_only.in
+test.xml
+
+# Test-related Files/Scripts
+test_checkpoint.sh
+test_enhanced_checkpoint.sh
+test.mix1
+test.out
+test.restart_scf
+test.wfc1
+test-suite/
+testing/
+
+# Build/Temporary/Cache Directories
+out/
+si.save/
+snapshots/
+archive/
+
+# Agent-specific Directories
+.claude/
+.gemini/
+.taskmaster/
