@@ -1,6 +1,0 @@
-QUANTUM ESPRESSO STATUS SNAPSHOT
-================================
-Timestamp: 2025/07/28 00:00:29
-SCF Iteration:     1
-Total Energy:    -23.68559973 Ry
-Calculation Status: Running

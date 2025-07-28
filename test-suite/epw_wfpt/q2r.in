@@ -1,6 +1,0 @@
-&input
-  fildyn = 'BAs.dyn'
-  zasr   = 'crystal'
-  flfrc  = 'BAs.fc'
-/
-
